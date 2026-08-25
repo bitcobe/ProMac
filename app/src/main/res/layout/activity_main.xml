@@ -38,7 +38,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Read WiFi Mac: Not Read"
+                android:text="WiFi Mac:\nNot Read"
                 android:textSize="14sp"
                 android:background="#10000000"
                 android:padding="10dp"
@@ -62,17 +62,26 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="New MAC (e.g. AA:BB:CC:11:22:33)"
+                android:hint="New MAC"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
                 android:maxLength="17"
                 android:inputType="textCapCharacters" />
 
             <Button
+                android:id="@+id/btnGenerateWifi"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Generate"
+                android:layout_marginStart="4dp" />
+
+            <Button
                 android:id="@+id/btnWriteWifi"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Write" />
+                android:text="Write"
+                android:enabled="false"
+                android:layout_marginStart="4dp" />
         </LinearLayout>
 
         <!-- DIVIDER -->
@@ -112,7 +121,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Bluetooth Mac: Not Read"
+                android:text="Bluetooth Mac:\nNot Read"
                 android:textSize="14sp"
                 android:background="#10000000"
                 android:padding="10dp"
@@ -136,17 +145,26 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="New MAC (e.g. AA:BB:CC:11:22:33)"
+                android:hint="New MAC"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
                 android:maxLength="17"
                 android:inputType="textCapCharacters" />
 
             <Button
+                android:id="@+id/btnGenerateBt"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Generate"
+                android:layout_marginStart="4dp" />
+
+            <Button
                 android:id="@+id/btnWriteBt"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Write" />
+                android:text="Write"
+                android:enabled="false"
+                android:layout_marginStart="4dp" />
         </LinearLayout>
 
     </LinearLayout>
