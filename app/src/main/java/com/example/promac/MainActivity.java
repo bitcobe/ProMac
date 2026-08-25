@@ -1,23 +1,30 @@
 package com.example.promac;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.DataOutputStream;
-import java.io.ByteArrayOutputStream;
 
 public class MainActivity extends AppCompatActivity {
 
     private TextView tvWifiResult, tvBtResult;
     private EditText etWifiMac, etBtMac;
+    private String currentWifiMac = "";
+    private String currentBtMac = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,14 +38,58 @@ public class MainActivity extends AppCompatActivity {
 
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
         Button btnWriteWifi = findViewById(R.id.btnWriteWifi);
+        Button btnCopyWifi = findViewById(R.id.btnCopyWifi);
+
         Button btnReadBt = findViewById(R.id.btnReadBt);
         Button btnWriteBt = findViewById(R.id.btnWriteBt);
+        Button btnCopyBt = findViewById(R.id.btnCopyBt);
+
+        // Auto formatting with ':' for input fields
+        setupMacFormatting(etWifiMac);
+        setupMacFormatting(etBtMac);
 
         btnReadWifi.setOnClickListener(v -> readMacAddress(true));
         btnReadBt.setOnClickListener(v -> readMacAddress(false));
 
         btnWriteWifi.setOnClickListener(v -> writeMacAddress(true));
         btnWriteBt.setOnClickListener(v -> writeMacAddress(false));
+
+        btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
+        btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
+    }
+
+    private void setupMacFormatting(EditText editText) {
+        editText.addTextChangedListener(new TextWatcher() {
+            private boolean isFormatting = false;
+
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (isFormatting) return;
+                isFormatting = true;
+
+                String clean = s.toString().replaceAll("[^A-Fa-f0-9]", "");
+                if (clean.length() > 12) {
+                    clean = clean.substring(0, 12);
+                }
+
+                StringBuilder formatted = new StringBuilder();
+                for (int i = 0; i < clean.length(); i++) {
+                    if (i > 0 && i % 2 == 0) {
+                        formatted.append(":");
+                    }
+                    formatted.append(clean.charAt(i));
+                }
+
+                s.replace(0, s.length(), formatted.toString().toUpperCase());
+                isFormatting = false;
+            }
+        });
     }
 
     private void readMacAddress(boolean isWifi) {
@@ -51,34 +102,35 @@ public class MainActivity extends AppCompatActivity {
             "/vendor/nvdata/APCFG/APRDEB/" + fileName
         };
 
-        String foundPath = null;
         byte[] bytes = null;
-
         for (String path : possiblePaths) {
             bytes = readBytesFromPath(path);
-            if (bytes != null && bytes.length > 0) {
-                foundPath = path;
-                break;
-            }
+            if (bytes != null && bytes.length > 0) break;
         }
 
-        if (foundPath == null || bytes == null) {
-            targetView.setText("Error: File " + fileName + " not found or unreadable.\nCheck Root (SU/Magisk) access.");
+        if (bytes == null) {
+            targetView.setText("Error: File " + fileName + " not found or unreadable.");
             return;
         }
 
         String mac = parseMacFromBytes(bytes, isWifi);
-        String type = isWifi ? "Wi-Fi" : "Bluetooth";
-        targetView.setText(type + " MAC Address:\n" + mac + "\n\nPath:\n" + foundPath);
+        if (isWifi) {
+            currentWifiMac = mac;
+            targetView.setText("Read WiFi Mac: " + mac);
+        } else {
+            currentBtMac = mac;
+            targetView.setText("Bluetooth Mac: " + mac);
+        }
     }
 
     private void writeMacAddress(boolean isWifi) {
         String fileName = isWifi ? "WIFI" : "BT_Addr";
         EditText targetEditText = isWifi ? etWifiMac : etBtMac;
+        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
         String rawMac = targetEditText.getText().toString().trim();
 
         if (!isValidMac(rawMac)) {
-            Toast.makeText(this, "Invalid MAC format! Use XX:XX:XX:XX:XX:XX", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Invalid MAC format!", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -96,9 +148,28 @@ public class MainActivity extends AppCompatActivity {
 
         if (successPrimary || successSecondary) {
             Toast.makeText(this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
-            readMacAddress(isWifi);
+            if (isWifi) {
+                currentWifiMac = rawMac;
+                targetView.setText("Write WiFi Mac: " + rawMac);
+            } else {
+                currentBtMac = rawMac;
+                targetView.setText("Write Bluetooth Mac: " + rawMac);
+            }
         } else {
             Toast.makeText(this, "Failed to write MAC. Ensure root access.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void copyToClipboard(String label, String text) {
+        if (text == null || text.isEmpty()) {
+            Toast.makeText(this, "No MAC address to copy!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = ClipData.newPlainText(label, text);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(this, label + " copied to clipboard!", Toast.LENGTH_SHORT).show();
         }
     }
 
