@@ -1,42 +1,131 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp"
-    android:gravity="center_horizontal">
+    android:padding="16dp">
 
-    <TextView
-        android:id="@+id/tvTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="ProMac - MTK NVRAM Reader"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="32dp" />
-
-    <Button
-        android:id="@+id/btnReadWifi"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Pročitaj Wi-Fi MAC"
-        android:layout_marginBottom="12dp" />
+        android:orientation="vertical">
 
-    <Button
-        android:id="@+id/btnReadBt"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Pročitaj Bluetooth MAC"
-        android:layout_marginBottom="32dp" />
+        <!-- Title -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ProMac - MTK MAC Tool"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginBottom="20dp" />
 
-    <TextView
-        android:id="@+id/tvResult"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Pritisnite dugme za prikaz adrese."
-        android:textSize="16sp"
-        android:background="#10000000"
-        android:padding="16dp"
-        android:fontFamily="monospace" />
+        <!-- SECTION 1: WI-FI -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Wi-Fi Configuration"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#2196F3"
+            android:layout_marginBottom="8dp" />
 
-</LinearLayout>
+        <Button
+            android:id="@+id/btnReadWifi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Read Wi-Fi MAC" />
+
+        <TextView
+            android:id="@+id/tvWifiResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Current Wi-Fi MAC: Not Read"
+            android:textSize="14sp"
+            android:background="#10000000"
+            android:padding="10dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="12dp"
+            android:fontFamily="monospace" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/etWifiMac"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="New MAC (e.g. AA:BB:CC:11:22:33)"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:inputType="textCapCharacters" />
+
+            <Button
+                android:id="@+id/btnWriteWifi"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Write" />
+        </LinearLayout>
+
+        <!-- DIVIDER -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:background="#D3D3D3"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- SECTION 2: BLUETOOTH -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Bluetooth Configuration"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#4CAF50"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnReadBt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Read Bluetooth MAC" />
+
+        <TextView
+            android:id="@+id/tvBtResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Current Bluetooth MAC: Not Read"
+            android:textSize="14sp"
+            android:background="#10000000"
+            android:padding="10dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="12dp"
+            android:fontFamily="monospace" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/etBtMac"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="New MAC (e.g. AA:BB:CC:11:22:33)"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:inputType="textCapCharacters" />
+
+            <Button
+                android:id="@+id/btnWriteBt"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Write" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
