@@ -10,6 +10,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.ByteArrayOutputStream;
@@ -25,7 +26,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvWifiResult, tvBtResult;
     private EditText etWifiMac, etBtMac;
     private Button btnWriteWifi, btnWriteBt;
-    
+    private Button btnCopyWifi, btnCopyBt;
+
     private String currentWifiMac = "";
     private String currentBtMac = "";
 
@@ -42,12 +44,12 @@ public class MainActivity extends AppCompatActivity {
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
         btnWriteWifi = findViewById(R.id.btnWriteWifi);
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
-        Button btnCopyWifi = findViewById(R.id.btnCopyWifi);
+        btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
         Button btnReadBt = findViewById(R.id.btnReadBt);
         btnWriteBt = findViewById(R.id.btnWriteBt);
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
-        Button btnCopyBt = findViewById(R.id.btnCopyBt);
+        btnCopyBt = findViewById(R.id.btnCopyBt);
 
         // Auto formatting with ':' for input fields
         setupMacFormatting(etWifiMac);
@@ -56,8 +58,8 @@ public class MainActivity extends AppCompatActivity {
         btnReadWifi.setOnClickListener(v -> readMacAddress(true));
         btnReadBt.setOnClickListener(v -> readMacAddress(false));
 
-        btnWriteWifi.setOnClickListener(v -> writeMacAddress(true));
-        btnWriteBt.setOnClickListener(v -> writeMacAddress(false));
+        btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress(true));
+        btnWriteBt.setOnClickListener(v -> confirmWriteMacAddress(false));
 
         btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
@@ -134,8 +136,13 @@ public class MainActivity extends AppCompatActivity {
 
         if (bytes == null) {
             targetView.setText((isWifi ? "WiFi Mac:\n" : "Bluetooth Mac:\n") + "Error reading file");
-            if (isWifi) btnWriteWifi.setEnabled(false);
-            else btnWriteBt.setEnabled(false);
+            if (isWifi) {
+                btnWriteWifi.setEnabled(false);
+                btnCopyWifi.setEnabled(false);
+            } else {
+                btnWriteBt.setEnabled(false);
+                btnCopyBt.setEnabled(false);
+            }
             return;
         }
 
@@ -144,23 +151,37 @@ public class MainActivity extends AppCompatActivity {
             currentWifiMac = mac;
             targetView.setText("Read WiFi Mac:\n" + mac);
             btnWriteWifi.setEnabled(true);
+            btnCopyWifi.setEnabled(true);
         } else {
             currentBtMac = mac;
             targetView.setText("Read Bluetooth Mac:\n" + mac);
             btnWriteBt.setEnabled(true);
+            btnCopyBt.setEnabled(true);
         }
     }
 
-    private void writeMacAddress(boolean isWifi) {
-        String fileName = isWifi ? "WIFI" : "BT_Addr";
+    private void confirmWriteMacAddress(boolean isWifi) {
         EditText targetEditText = isWifi ? etWifiMac : etBtMac;
-        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
         String rawMac = targetEditText.getText().toString().trim();
 
         if (!isValidMac(rawMac)) {
             Toast.makeText(this, "Invalid MAC format!", Toast.LENGTH_LONG).show();
             return;
         }
+
+        String type = isWifi ? "Wi-Fi" : "Bluetooth";
+
+        new AlertDialog.Builder(this)
+            .setTitle("Confirm Write")
+            .setMessage("Are you sure you want to write " + rawMac + " as the new " + type + " MAC address?")
+            .setPositiveButton("Yes", (dialog, which) -> writeMacAddress(isWifi, rawMac))
+            .setNegativeButton("No", null)
+            .show();
+    }
+
+    private void writeMacAddress(boolean isWifi, String rawMac) {
+        String fileName = isWifi ? "WIFI" : "BT_Addr";
+        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
 
         byte[] macBytes = parseMacToBytes(rawMac);
         if (macBytes == null) {
@@ -179,9 +200,11 @@ public class MainActivity extends AppCompatActivity {
             if (isWifi) {
                 currentWifiMac = rawMac;
                 targetView.setText("Write WiFi Mac:\n" + rawMac);
+                btnCopyWifi.setEnabled(true);
             } else {
                 currentBtMac = rawMac;
                 targetView.setText("Write Bluetooth Mac:\n" + rawMac);
+                btnCopyBt.setEnabled(true);
             }
         } else {
             Toast.makeText(this, "Failed to write MAC. Ensure root access.", Toast.LENGTH_LONG).show();
