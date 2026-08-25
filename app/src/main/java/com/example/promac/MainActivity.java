@@ -18,11 +18,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Random;
 
 public class MainActivity extends AppCompatActivity {
 
     private TextView tvWifiResult, tvBtResult;
     private EditText etWifiMac, etBtMac;
+    private Button btnWriteWifi, btnWriteBt;
+    
     private String currentWifiMac = "";
     private String currentBtMac = "";
 
@@ -37,11 +40,13 @@ public class MainActivity extends AppCompatActivity {
         etBtMac = findViewById(R.id.etBtMac);
 
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
-        Button btnWriteWifi = findViewById(R.id.btnWriteWifi);
+        btnWriteWifi = findViewById(R.id.btnWriteWifi);
+        Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         Button btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
         Button btnReadBt = findViewById(R.id.btnReadBt);
-        Button btnWriteBt = findViewById(R.id.btnWriteBt);
+        btnWriteBt = findViewById(R.id.btnWriteBt);
+        Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         Button btnCopyBt = findViewById(R.id.btnCopyBt);
 
         // Auto formatting with ':' for input fields
@@ -53,6 +58,9 @@ public class MainActivity extends AppCompatActivity {
 
         btnWriteWifi.setOnClickListener(v -> writeMacAddress(true));
         btnWriteBt.setOnClickListener(v -> writeMacAddress(false));
+
+        btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
+        btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
 
         btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
         btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
@@ -92,6 +100,22 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private String generateRandomMac() {
+        Random random = new Random();
+        byte[] macBytes = new byte[6];
+        random.nextBytes(macBytes);
+        
+        // Postavljanje lokalno administrirane unicast adrese
+        macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 6; i++) {
+            sb.append(String.format("%02X", macBytes[i]));
+            if (i < 5) sb.append(":");
+        }
+        return sb.toString();
+    }
+
     private void readMacAddress(boolean isWifi) {
         String fileName = isWifi ? "WIFI" : "BT_Addr";
         TextView targetView = isWifi ? tvWifiResult : tvBtResult;
@@ -109,17 +133,21 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (bytes == null) {
-            targetView.setText("Error: File " + fileName + " not found or unreadable.");
+            targetView.setText((isWifi ? "WiFi Mac:\n" : "Bluetooth Mac:\n") + "Error reading file");
+            if (isWifi) btnWriteWifi.setEnabled(false);
+            else btnWriteBt.setEnabled(false);
             return;
         }
 
         String mac = parseMacFromBytes(bytes, isWifi);
         if (isWifi) {
             currentWifiMac = mac;
-            targetView.setText("Read WiFi Mac: " + mac);
+            targetView.setText("Read WiFi Mac:\n" + mac);
+            btnWriteWifi.setEnabled(true);
         } else {
             currentBtMac = mac;
-            targetView.setText("Bluetooth Mac: " + mac);
+            targetView.setText("Read Bluetooth Mac:\n" + mac);
+            btnWriteBt.setEnabled(true);
         }
     }
 
@@ -150,10 +178,10 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
             if (isWifi) {
                 currentWifiMac = rawMac;
-                targetView.setText("Write WiFi Mac: " + rawMac);
+                targetView.setText("Write WiFi Mac:\n" + rawMac);
             } else {
                 currentBtMac = rawMac;
-                targetView.setText("Write Bluetooth Mac: " + rawMac);
+                targetView.setText("Write Bluetooth Mac:\n" + rawMac);
             }
         } else {
             Toast.makeText(this, "Failed to write MAC. Ensure root access.", Toast.LENGTH_LONG).show();
