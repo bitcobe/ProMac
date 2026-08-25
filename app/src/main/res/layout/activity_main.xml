@@ -62,7 +62,7 @@
                 android:id="@+id/etWifiMac"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_weight="4"
                 android:hint="New MAC"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
@@ -71,17 +71,21 @@
 
             <Button
                 android:id="@+id/btnGenerateWifi"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
                 android:text="GEN"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
                 android:layout_marginStart="4dp" />
 
             <Button
                 android:id="@+id/btnWriteWifi"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="2"
+                android:minWidth="0dp"
                 android:text="Write"
                 android:enabled="false"
                 android:layout_marginStart="4dp" />
@@ -148,7 +152,7 @@
                 android:id="@+id/etBtMac"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_weight="4"
                 android:hint="New MAC"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
@@ -157,17 +161,21 @@
 
             <Button
                 android:id="@+id/btnGenerateBt"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
                 android:text="GEN"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
                 android:layout_marginStart="4dp" />
 
             <Button
                 android:id="@+id/btnWriteBt"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="2"
+                android:minWidth="0dp"
                 android:text="Write"
                 android:enabled="false"
                 android:layout_marginStart="4dp" />
