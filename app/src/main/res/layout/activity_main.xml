@@ -9,16 +9,6 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- Title -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="ProMac - MTK MAC Tool"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:layout_marginBottom="20dp" />
-
         <!-- SECTION 1: WI-FI -->
         <TextView
             android:layout_width="match_parent"
@@ -35,17 +25,32 @@
             android:layout_height="wrap_content"
             android:text="Read Wi-Fi MAC" />
 
-        <TextView
-            android:id="@+id/tvWifiResult"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Current Wi-Fi MAC: Not Read"
-            android:textSize="14sp"
-            android:background="#10000000"
-            android:padding="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginTop="6dp"
-            android:layout_marginBottom="12dp"
-            android:fontFamily="monospace" />
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/tvWifiResult"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Read WiFi Mac: Not Read"
+                android:textSize="14sp"
+                android:background="#10000000"
+                android:padding="10dp"
+                android:fontFamily="monospace" />
+
+            <Button
+                android:id="@+id/btnCopyWifi"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Copy"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -60,6 +65,7 @@
                 android:hint="New MAC (e.g. AA:BB:CC:11:22:33)"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
+                android:maxLength="17"
                 android:inputType="textCapCharacters" />
 
             <Button
@@ -93,17 +99,32 @@
             android:layout_height="wrap_content"
             android:text="Read Bluetooth MAC" />
 
-        <TextView
-            android:id="@+id/tvBtResult"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Current Bluetooth MAC: Not Read"
-            android:textSize="14sp"
-            android:background="#10000000"
-            android:padding="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginTop="6dp"
-            android:layout_marginBottom="12dp"
-            android:fontFamily="monospace" />
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/tvBtResult"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Bluetooth Mac: Not Read"
+                android:textSize="14sp"
+                android:background="#10000000"
+                android:padding="10dp"
+                android:fontFamily="monospace" />
+
+            <Button
+                android:id="@+id/btnCopyBt"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Copy"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -118,6 +139,7 @@
                 android:hint="New MAC (e.g. AA:BB:CC:11:22:33)"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
+                android:maxLength="17"
                 android:inputType="textCapCharacters" />
 
             <Button
