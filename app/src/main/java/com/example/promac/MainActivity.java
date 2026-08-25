@@ -11,6 +11,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.DataOutputStream;
+import java.io.ByteArrayOutputStream;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -41,17 +43,27 @@ public class MainActivity extends AppCompatActivity {
 
     private void readMacAddress(boolean isWifi) {
         String fileName = isWifi ? "WIFI" : "BT_Addr";
-        String foundPath = findMtkFilePath(fileName);
         TextView targetView = isWifi ? tvWifiResult : tvBtResult;
 
-        if (foundPath == null) {
-            targetView.setText("Error: File " + fileName + " not found.\nCheck Root access.");
-            return;
+        String[] possiblePaths = {
+            "/nvdata/APCFG/APRDEB/" + fileName,
+            "/data/nvram/APCFG/APRDEB/" + fileName,
+            "/vendor/nvdata/APCFG/APRDEB/" + fileName
+        };
+
+        String foundPath = null;
+        byte[] bytes = null;
+
+        for (String path : possiblePaths) {
+            bytes = readBytesFromPath(path);
+            if (bytes != null && bytes.length > 0) {
+                foundPath = path;
+                break;
+            }
         }
 
-        byte[] bytes = readBytesFromPath(foundPath);
-        if (bytes == null || bytes.length == 0) {
-            targetView.setText("Error reading file at:\n" + foundPath + "\nGrant Root permission.");
+        if (foundPath == null || bytes == null) {
+            targetView.setText("Error: File " + fileName + " not found or unreadable.\nCheck Root (SU/Magisk) access.");
             return;
         }
 
@@ -111,10 +123,13 @@ public class MainActivity extends AppCompatActivity {
         }
 
         try {
-            String cmd = "printf '" + hexString.toString() + "' > " + filePath +
-                         " && chmod 0660 " + filePath +
-                         " && chown system:system " + filePath;
-            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            Process process = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(process.getOutputStream());
+            os.writeBytes("printf '" + hexString.toString() + "' > " + filePath + "\n");
+            os.writeBytes("chmod 0660 " + filePath + "\n");
+            os.writeBytes("chown system:system " + filePath + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
             process.waitFor();
             return process.exitValue() == 0;
         } catch (Exception e) {
@@ -136,45 +151,13 @@ public class MainActivity extends AppCompatActivity {
         return bytes;
     }
 
-    private String findMtkFilePath(String fileName) {
-        String[] possiblePaths = {
-            "/nvdata/APCFG/APRDEB/" + fileName,
-            "/data/nvram/APCFG/APRDEB/" + fileName,
-            "/vendor/nvdata/APCFG/APRDEB/" + fileName
-        };
-
-        for (String path : possiblePaths) {
-            File f = new File(path);
-            if (f.exists()) return path;
-        }
-
-        for (String path : possiblePaths) {
-            if (checkFileExistsWithRoot(path)) {
-                return path;
-            }
-        }
-        return null;
-    }
-
-    private boolean checkFileExistsWithRoot(String path) {
-        try {
-            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", "[ -f " + path + " ] && echo 1 || echo 0"});
-            InputStream is = process.getInputStream();
-            int result = is.read();
-            process.waitFor();
-            return result == '1';
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     private byte[] readBytesFromPath(String filePath) {
         File file = new File(filePath);
-        if (file.canRead()) {
+        if (file.exists() && file.canRead()) {
             try (FileInputStream fis = new FileInputStream(file)) {
                 byte[] data = new byte[(int) file.length()];
-                fis.read(data);
-                return data;
+                int read = fis.read(data);
+                if (read > 0) return data;
             } catch (IOException ignored) {}
         }
         return readBytesWithRoot(filePath);
@@ -182,17 +165,25 @@ public class MainActivity extends AppCompatActivity {
 
     private byte[] readBytesWithRoot(String filePath) {
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + filePath});
+            Process process = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(process.getOutputStream());
             InputStream is = process.getInputStream();
-            byte[] buffer = new byte[256];
-            int bytesRead = is.read(buffer);
-            process.waitFor();
 
-            if (bytesRead > 0) {
-                byte[] data = new byte[bytesRead];
-                System.arraycopy(buffer, 0, data, 0, bytesRead);
-                return data;
+            os.writeBytes("cat " + filePath + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
+
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] temp = new byte[256];
+            int bytesRead;
+
+            while ((bytesRead = is.read(temp)) != -1) {
+                buffer.write(temp, 0, bytesRead);
             }
+
+            process.waitFor();
+            byte[] data = buffer.toByteArray();
+            return data.length > 0 ? data : null;
         } catch (Exception e) {
             e.printStackTrace();
         }
