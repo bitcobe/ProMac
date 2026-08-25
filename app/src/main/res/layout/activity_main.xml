@@ -38,7 +38,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="WiFi Mac:\nNot Read"
+                android:text="WiFi Mac:\n "
                 android:textSize="14sp"
                 android:background="#10000000"
                 android:padding="10dp"
@@ -49,6 +49,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Copy"
+                android:enabled="false"
                 android:layout_marginStart="8dp" />
         </LinearLayout>
 
@@ -72,7 +73,9 @@
                 android:id="@+id/btnGenerateWifi"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Generate"
+                android:text="GEN"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:layout_marginStart="4dp" />
 
             <Button
@@ -121,7 +124,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Bluetooth Mac:\nNot Read"
+                android:text="Bluetooth Mac:\n "
                 android:textSize="14sp"
                 android:background="#10000000"
                 android:padding="10dp"
@@ -132,6 +135,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Copy"
+                android:enabled="false"
                 android:layout_marginStart="8dp" />
         </LinearLayout>
 
@@ -155,7 +159,9 @@
                 android:id="@+id/btnGenerateBt"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Generate"
+                android:text="GEN"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:layout_marginStart="4dp" />
 
             <Button
