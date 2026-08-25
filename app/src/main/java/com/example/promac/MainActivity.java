@@ -2,7 +2,9 @@ package com.example.promac;
 
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.File;
@@ -12,45 +14,128 @@ import java.io.InputStream;
 
 public class MainActivity extends AppCompatActivity {
 
-    private TextView tvResult;
+    private TextView tvWifiResult, tvBtResult;
+    private EditText etWifiMac, etBtMac;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        tvResult = findViewById(R.id.tvResult);
+        tvWifiResult = findViewById(R.id.tvWifiResult);
+        tvBtResult = findViewById(R.id.tvBtResult);
+        etWifiMac = findViewById(R.id.etWifiMac);
+        etBtMac = findViewById(R.id.etBtMac);
+
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
+        Button btnWriteWifi = findViewById(R.id.btnWriteWifi);
         Button btnReadBt = findViewById(R.id.btnReadBt);
+        Button btnWriteBt = findViewById(R.id.btnWriteBt);
 
         btnReadWifi.setOnClickListener(v -> readMacAddress(true));
         btnReadBt.setOnClickListener(v -> readMacAddress(false));
+
+        btnWriteWifi.setOnClickListener(v -> writeMacAddress(true));
+        btnWriteBt.setOnClickListener(v -> writeMacAddress(false));
     }
 
     private void readMacAddress(boolean isWifi) {
         String fileName = isWifi ? "WIFI" : "BT_Addr";
         String foundPath = findMtkFilePath(fileName);
+        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
 
         if (foundPath == null) {
-            tvResult.setText("Greška: Fajl " + fileName + " nije pronađen.\n\nProverite da li je telefon rutovan (Magisk/SU) i da li ste odobrili Root pristup aplikaciji.");
+            targetView.setText("Error: File " + fileName + " not found.\nCheck Root access.");
             return;
         }
 
         byte[] bytes = readBytesFromPath(foundPath);
         if (bytes == null || bytes.length == 0) {
-            tvResult.setText("Greška pri čitanju fajla na putanji:\n" + foundPath + "\n\nObezbedite Root dozvolu.");
+            targetView.setText("Error reading file at:\n" + foundPath + "\nGrant Root permission.");
             return;
         }
 
         String mac = parseMacFromBytes(bytes, isWifi);
         String type = isWifi ? "Wi-Fi" : "Bluetooth";
-        tvResult.setText(type + " MAC Adresa:\n" + mac + "\n\nPutanja:\n" + foundPath);
+        targetView.setText(type + " MAC Address:\n" + mac + "\n\nPath:\n" + foundPath);
     }
 
-    /**
-     * Pronalazi putanju fajla prvenstveno proveravajući standardno, 
-     * a ako ne uspe, koristi Root (su) test.
-     */
+    private void writeMacAddress(boolean isWifi) {
+        String fileName = isWifi ? "WIFI" : "BT_Addr";
+        EditText targetEditText = isWifi ? etWifiMac : etBtMac;
+        String rawMac = targetEditText.getText().toString().trim();
+
+        if (!isValidMac(rawMac)) {
+            Toast.makeText(this, "Invalid MAC format! Use XX:XX:XX:XX:XX:XX", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        byte[] macBytes = parseMacToBytes(rawMac);
+        if (macBytes == null) {
+            Toast.makeText(this, "Error parsing MAC address.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String primaryPath = "/nvdata/APCFG/APRDEB/" + fileName;
+        String secondaryPath = "/data/nvram/APCFG/APRDEB/" + fileName;
+
+        boolean successPrimary = writeMacToMtkFile(primaryPath, macBytes, isWifi);
+        boolean successSecondary = writeMacToMtkFile(secondaryPath, macBytes, isWifi);
+
+        if (successPrimary || successSecondary) {
+            Toast.makeText(this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
+            readMacAddress(isWifi);
+        } else {
+            Toast.makeText(this, "Failed to write MAC. Ensure root access.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean writeMacToMtkFile(String filePath, byte[] macBytes, boolean isWifi) {
+        byte[] currentBytes = readBytesFromPath(filePath);
+        if (currentBytes == null) {
+            currentBytes = new byte[isWifi ? 16 : 6];
+        }
+
+        int offset = isWifi ? 4 : 0;
+        if (currentBytes.length < offset + 6) {
+            byte[] expanded = new byte[offset + 6];
+            System.arraycopy(currentBytes, 0, expanded, 0, currentBytes.length);
+            currentBytes = expanded;
+        }
+
+        System.arraycopy(macBytes, 0, currentBytes, offset, 6);
+
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : currentBytes) {
+            hexString.append(String.format("\\x%02X", b));
+        }
+
+        try {
+            String cmd = "printf '" + hexString.toString() + "' > " + filePath +
+                         " && chmod 0660 " + filePath +
+                         " && chown system:system " + filePath;
+            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            process.waitFor();
+            return process.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isValidMac(String mac) {
+        return mac.matches("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");
+    }
+
+    private byte[] parseMacToBytes(String mac) {
+        String[] parts = mac.split("[:-]");
+        if (parts.length != 6) return null;
+        byte[] bytes = new byte[6];
+        for (int i = 0; i < 6; i++) {
+            bytes[i] = (byte) Integer.parseInt(parts[i], 16);
+        }
+        return bytes;
+    }
+
     private String findMtkFilePath(String fileName) {
         String[] possiblePaths = {
             "/nvdata/APCFG/APRDEB/" + fileName,
@@ -58,19 +143,16 @@ public class MainActivity extends AppCompatActivity {
             "/vendor/nvdata/APCFG/APRDEB/" + fileName
         };
 
-        // 1. Provera standardnim putem
         for (String path : possiblePaths) {
             File f = new File(path);
             if (f.exists()) return path;
         }
 
-        // 2. Provera preko Root 'su' komande ako sistem skriva fajl
         for (String path : possiblePaths) {
             if (checkFileExistsWithRoot(path)) {
                 return path;
             }
         }
-
         return null;
     }
 
@@ -118,16 +200,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String parseMacFromBytes(byte[] data, boolean isWifi) {
-        if (data == null) return "Prazan fajl";
+        if (data == null) return "Empty File";
         int offset = 0;
         int length = 6;
 
         if (isWifi) {
             if (data.length >= 10) offset = 4;
             else if (data.length >= 6) offset = 0;
-            else return "Neispravna veličina WIFI fajla";
+            else return "Invalid WIFI file size";
         } else {
-            if (data.length < 6) return "Neispravna veličina BT_Addr fajla";
+            if (data.length < 6) return "Invalid BT_Addr file size";
             offset = 0;
         }
 
