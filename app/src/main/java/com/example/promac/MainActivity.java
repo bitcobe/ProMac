@@ -10,6 +10,7 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -24,18 +25,18 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
-    private TextView tvWifiResult, tvBtResult;
-    private EditText etWifiMac, etBtMac;
-    private Button btnWriteWifi, btnWriteBt;
-    private Button btnCopyWifi, btnCopyBt;
+    private TextView tvWifiResult;
+    private EditText etWifiMac;
+    private Button btnWriteWifi, btnCopyWifi;
+    private CheckBox cbGenOnReset;
 
     private String currentWifiMac = "";
-    private String currentBtMac = "";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -46,34 +47,20 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         tvWifiResult = findViewById(R.id.tvWifiResult);
-        tvBtResult = findViewById(R.id.tvBtResult);
         etWifiMac = findViewById(R.id.etWifiMac);
-        etBtMac = findViewById(R.id.etBtMac);
+        cbGenOnReset = findViewById(R.id.cbGenOnReset); // Dodaj CheckBox u layout ako ga imaš
 
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
         btnWriteWifi = findViewById(R.id.btnWriteWifi);
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        Button btnReadBt = findViewById(R.id.btnReadBt);
-        btnWriteBt = findViewById(R.id.btnWriteBt);
-        Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
-        btnCopyBt = findViewById(R.id.btnCopyBt);
-
         setupMacFormatting(etWifiMac);
-        setupMacFormatting(etBtMac);
 
-        btnReadWifi.setOnClickListener(v -> readMacAddress(true));
-        btnReadBt.setOnClickListener(v -> readMacAddress(false));
-
-        btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress(true));
-        btnWriteBt.setOnClickListener(v -> confirmWriteMacAddress(false));
-
+        btnReadWifi.setOnClickListener(v -> readMacAddress());
+        btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress());
         btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
-        btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
-
         btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
-        btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
     }
 
     private void setupMacFormatting(EditText editText) {
@@ -112,223 +99,166 @@ public class MainActivity extends AppCompatActivity {
 
     private String generateRandomMac() {
         SecureRandom random = new SecureRandom();
-        byte[] macBytes = new byte[6];
-        random.nextBytes(macBytes);
+        byte[] b = new byte[5];
+        random.nextBytes(b);
 
-        macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < 6; i++) {
-            sb.append(String.format("%02X", macBytes[i]));
-            if (i < 5) sb.append(":");
-        }
-        return sb.toString();
+        // ChameleMAC logika generisanja nasumične adrese (AA:XX:XX:XX:XX:XX)[cite: 1]
+        return String.format("AA:%02X:%02X:%02X:%02X:%02X", b[0], b[1], b[2], b[3], b[4]);
     }
 
-    private void readMacAddress(boolean isWifi) {
-        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
-        targetView.setText("Reading...");
+    private void readMacAddress() {
+        tvWifiResult.setText("Reading...");
 
         executor.execute(() -> {
-            String fileName = isWifi ? "WIFI" : "BT_Addr";
-            String[] possiblePaths = {
-                "/nvdata/APCFG/APRDEB/" + fileName,
-                "/data/nvram/APCFG/APRDEB/" + fileName,
-                "/vendor/nvdata/APCFG/APRDEB/" + fileName
-            };
+            String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
+            
+            // ChameleMAC inicijalno izdvajanje fajla iz NVRAM-a[cite: 1]
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/WIFI " + destPath);[cite: 1]
+            cmds.add("chmod 0777 " + destPath);[cite: 1]
+            executeRootCmds(cmds);
 
-            byte[] bytes = null;
-            for (String path : possiblePaths) {
-                bytes = readBytesFromPath(path);
-                if (bytes != null && bytes.length > 0) break;
+            File localFile = new File(destPath);
+            byte[] fileContent = new byte[512];
+            boolean readSuccess = false;
+
+            if (localFile.exists()) {
+                try (FileInputStream fin = new FileInputStream(localFile)) {
+                    fin.read(fileContent);[cite: 1]
+                    readSuccess = true;
+                } catch (IOException ignored) {}
             }
 
-            final byte[] finalBytes = bytes;
+            final boolean success = readSuccess;
+            final byte[] data = fileContent;
+
             mainHandler.post(() -> {
-                if (finalBytes == null) {
-                    targetView.setText((isWifi ? "WiFi Mac:\n" : "Bluetooth Mac:\n") + "Error reading file");
-                    if (isWifi) {
-                        btnWriteWifi.setEnabled(false);
-                        btnCopyWifi.setEnabled(false);
-                    } else {
-                        btnWriteBt.setEnabled(false);
-                        btnCopyBt.setEnabled(false);
-                    }
+                if (!success) {
+                    tvWifiResult.setText("WiFi Mac:\nError reading file");
+                    btnWriteWifi.setEnabled(false);
+                    btnCopyWifi.setEnabled(false);
                     return;
                 }
 
-                String mac = parseMacFromBytes(finalBytes, isWifi);
-                if (isWifi) {
-                    currentWifiMac = mac;
-                    targetView.setText("Read WiFi Mac:\n" + mac);
-                    btnWriteWifi.setEnabled(true);
-                    btnCopyWifi.setEnabled(true);
-                } else {
-                    currentBtMac = mac;
-                    targetView.setText("Read Bluetooth Mac:\n" + mac);
-                    btnWriteBt.setEnabled(true);
-                    btnCopyBt.setEnabled(true);
+                // Provera -95 (0xA1) zastavice za auto-generisanje iz ChameleMAC-a[cite: 1]
+                if (data[4] == -95 && cbGenOnReset != null) {[cite: 1]
+                    cbGenOnReset.setChecked(true);
                 }
+
+                String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
+                        data[4], data[5], data[6], data[7], data[8], data[9]);[cite: 1]
+
+                currentWifiMac = mac;
+                tvWifiResult.setText("Read WiFi Mac:\n" + mac);
+                btnWriteWifi.setEnabled(true);
+                btnCopyWifi.setEnabled(true);
             });
         });
     }
 
-    private void confirmWriteMacAddress(boolean isWifi) {
-        EditText targetEditText = isWifi ? etWifiMac : etBtMac;
-        String rawMac = targetEditText.getText().toString().trim();
+    private void confirmWriteMacAddress() {
+        boolean autoGen = (cbGenOnReset != null && cbGenOnReset.isChecked());
+        String rawMac = etWifiMac.getText().toString().trim();
 
-        if (!isValidMac(rawMac)) {
-            Toast.makeText(this, "Invalid MAC format!", Toast.LENGTH_LONG).show();
+        if (!autoGen && !isValidMac(rawMac)) {
+            Toast.makeText(this, "Your MAC is invalid.", Toast.LENGTH_LONG).show();[cite: 1]
             return;
         }
 
-        String type = isWifi ? "Wi-Fi" : "Bluetooth";
-
         new AlertDialog.Builder(this)
-            .setTitle("Confirm Write")
-            .setMessage("Are you sure you want to write " + rawMac + " as the new " + type + " MAC address?")
-            .setPositiveButton("Yes", (dialog, which) -> startWriteProcess(isWifi, rawMac))
-            .setNegativeButton("No", null)
+            .setTitle("Confirmation")[cite: 1]
+            .setMessage("Do you confirm changing the MAC ?")[cite: 1]
+            .setPositiveButton("Change", (dialog, which) -> startWriteProcess(rawMac, autoGen))[cite: 1]
+            .setNegativeButton("Cancel", null)[cite: 1]
             .show();
     }
 
-    private void startWriteProcess(boolean isWifi, String rawMac) {
-        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
-        Toast.makeText(this, "Writing MAC address...", Toast.LENGTH_SHORT).show();
+    private void startWriteProcess(String rawMac, boolean autoGen) {
+        Toast.makeText(this, "Changing MAC...", Toast.LENGTH_SHORT).show();
 
         executor.execute(() -> {
-            byte[] macBytes = parseMacToBytes(rawMac);
-            if (macBytes == null) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error parsing MAC address.", Toast.LENGTH_SHORT).show());
+            String[] b;
+            if (autoGen) {
+                // Fiktivni niz koji ChameleMAC koristi za auto-gen režim[cite: 1]
+                b = new String[]{"A1", "02", "02", "02", "02", "03"};[cite: 1]
+            } else {
+                b = rawMac.split(":");[cite: 1]
+            }
+
+            String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
+            File localFile = new File(destPath);
+            byte[] fileContent = new byte[512];
+
+            // 1. Učitavanje postojećeg lokalnog fajla[cite: 1]
+            try (FileInputStream fin = new FileInputStream(localFile)) {
+                fin.read(fileContent);[cite: 1]
+            } catch (IOException e) {
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());[cite: 1]
                 return;
             }
 
-            boolean isSuccess = writeMacChameleStylePersistent(isWifi, macBytes);
+            // 2. Modifikacija bajtova na tačnim pozicijama [4..9][cite: 1]
+            fileContent[4] = hexToByte(b[0]);[cite: 1]
+            fileContent[5] = hexToByte(b[1]);[cite: 1]
+            fileContent[6] = hexToByte(b[2]);[cite: 1]
+            fileContent[7] = hexToByte(b[3]);[cite: 1]
+            fileContent[8] = hexToByte(b[4]);[cite: 1]
+            fileContent[9] = hexToByte(b[5]);[cite: 1]
 
-            mainHandler.post(() -> {
-                if (isSuccess) {
-                    Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
-                    if (isWifi) {
-                        currentWifiMac = rawMac;
-                        targetView.setText("Write WiFi Mac:\n" + rawMac);
-                        btnCopyWifi.setEnabled(true);
-                    } else {
-                        currentBtMac = rawMac;
-                        targetView.setText("Write Bluetooth Mac:\n" + rawMac);
-                        btnCopyBt.setEnabled(true);
-                    }
-                } else {
-                    Toast.makeText(MainActivity.this, "Failed to write MAC. Verify Root.", Toast.LENGTH_LONG).show();
+            // 3. Upis nazad u privatni fajl aplikacije[cite: 1]
+            try (FileOutputStream file = new FileOutputStream(destPath)) {
+                file.write(fileContent);[cite: 1]
+            } catch (IOException e) {
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());[cite: 1]
+                return;
+            }
+
+            // 4. Privremeno gašenje Wi-Fi interfejsa (ChameleMAC metoda)[cite: 1]
+            boolean wifiEnabled = false;
+            WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            try {
+                if (wifi != null && wifi.isWifiEnabled()) {
+                    wifiEnabled = true;
+                    wifi.setWifiEnabled(false);[cite: 1]
                 }
-            });
+            } catch (Exception ignored) {}
+
+            // 5. TAČAN ChameleMAC niz root komandi[cite: 1]
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");[cite: 1]
+            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");[cite: 1]
+            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");[cite: 1]
+            executeRootCmds(cmds);
+
+            // 6. Ponovno paljenje Wi-Fi-ja[cite: 1]
+            if (wifiEnabled && wifi != null) {
+                try {
+                    wifi.setWifiEnabled(true);[cite: 1]
+                } catch (Exception ignored) {}
+            }
+
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "MAC address has been changed successfully.", Toast.LENGTH_LONG).show());[cite: 1]
         });
     }
 
-    private boolean writeMacChameleStylePersistent(boolean isWifi, byte[] newMacBytes) {
-        String fileName = isWifi ? "WIFI" : "BT_Addr";
-        
-        String targetNVRAM = "/data/nvram/APCFG/APRDEB/" + fileName;
-        String targetNVDATA = "/nvdata/APCFG/APRDEB/" + fileName;
-        String targetVendor = "/vendor/nvdata/APCFG/APRDEB/" + fileName;
-
-        File localFile = new File(getFilesDir(), fileName);
-        String tempPath = localFile.getAbsolutePath();
-
-        // 1. Učitavanje postojecih bajtova iz NVRAM-a
-        String pullCmd = "cp -rp " + targetNVRAM + " " + tempPath + "\n" +
-                         "chmod 0777 " + tempPath + "\n";
-        
-        if (!runRootScript(pullCmd)) {
-            pullCmd = "cp -rp " + targetNVDATA + " " + tempPath + "\n" +
-                      "chmod 0777 " + tempPath + "\n";
-            runRootScript(pullCmd);
-        }
-
-        if (!localFile.exists()) {
-            return false;
-        }
-
-        // 2. Modifikacija bajtova u memoriji (Java sloj)
-        byte[] fileContent = new byte[(int) localFile.length()];
-        if (fileContent.length == 0) fileContent = new byte[512];
-
-        try (FileInputStream fin = new FileInputStream(localFile)) {
-            fin.read(fileContent);
-        } catch (IOException e) {
-            return false;
-        }
-
-        int offset = isWifi ? 4 : 0;
-        for (int i = 0; i < 6; i++) {
-            fileContent[offset + i] = newMacBytes[i];
-        }
-
-        try (FileOutputStream fout = new FileOutputStream(localFile)) {
-            fout.write(fileContent);
-            fout.flush();
-        } catch (IOException e) {
-            return false;
-        }
-
-        // 3. Gašenje Wi-Fi modul pre pisanja
-        WifiManager wifiManager = null;
-        boolean wasEnabled = false;
-        if (isWifi) {
-            try {
-                wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                if (wifiManager != null && wifiManager.isWifiEnabled()) {
-                    wasEnabled = true;
-                    wifiManager.setWifiEnabled(false);
-                    Thread.sleep(1000);
-                }
-            } catch (Exception ignored) {}
-        }
-
-        // 4. Sinhronizovani upis na sve lokacije + brisanje nvram_daemon keša
-        StringBuilder pushCmd = new StringBuilder();
-
-        pushCmd.append("mount -o remount,rw /nvdata 2>/dev/null\n");
-        pushCmd.append("mount -o remount,rw /vendor/nvdata 2>/dev/null\n");
-        pushCmd.append("mount -o remount,rw /data 2>/dev/null\n");
-
-        String[] targetPaths = {targetNVRAM, targetNVDATA, targetVendor};
-        for (String path : targetPaths) {
-            pushCmd.append("cp -f ").append(tempPath).append(" ").append(path).append(" 2>/dev/null\n");
-            pushCmd.append("chmod 660 ").append(path).append(" 2>/dev/null\n");
-            pushCmd.append("chown root.nvram ").append(path).append(" 2>/dev/null || chown system.system ").append(path).append(" 2>/dev/null\n");
-            pushCmd.append("restorecon -F ").append(path).append(" 2>/dev/null\n");
-        }
-
-        // Brisanje povratnog keša koji spriječava zamenjivanje stare adrese nakon restarta
-        pushCmd.append("rm -f /data/nvram/media/WIFI* 2>/dev/null\n");
-        pushCmd.append("rm -f /nvdata/media/WIFI* 2>/dev/null\n");
-        pushCmd.append("sync\n");
-
-        boolean res = runRootScript(pushCmd.toString());
-
-        // 5. Paljenje Wi-Fi modula
-        if (isWifi && wasEnabled && wifiManager != null) {
-            try {
-                wifiManager.setWifiEnabled(true);
-            } catch (Exception ignored) {}
-        }
-
-        return res;
+    private byte hexToByte(String s) {
+        return (byte) ((Character.digit(s.charAt(0), 16) << 4) + Character.digit(s.charAt(1), 16));[cite: 1]
     }
 
-    private boolean runRootScript(String script) {
+    private boolean executeRootCmds(ArrayList<String> cmds) {
         Process process = null;
         DataOutputStream os = null;
         try {
             process = Runtime.getRuntime().exec("su");
             os = new DataOutputStream(process.getOutputStream());
-            os.writeBytes(script);
+            for (String tmp : cmds) {
+                os.writeBytes(tmp + "\n");
+            }
             os.writeBytes("exit\n");
             os.flush();
             process.waitFor();
             return process.exitValue() == 0;
         } catch (Exception e) {
-            e.printStackTrace();
             return false;
         } finally {
             try {
@@ -339,85 +269,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isValidMac(String mac) {
-        return mac.matches("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");
-    }
-
-    private byte[] parseMacToBytes(String mac) {
-        String[] parts = mac.split("[:-]");
-        if (parts.length != 6) return null;
-        byte[] bytes = new byte[6];
-        for (int i = 0; i < 6; i++) {
-            bytes[i] = (byte) Integer.parseInt(parts[i], 16);
-        }
-        return bytes;
-    }
-
-    private byte[] readBytesFromPath(String filePath) {
-        File file = new File(filePath);
-        if (file.exists() && file.canRead()) {
-            try (FileInputStream fis = new FileInputStream(file)) {
-                byte[] data = new byte[(int) file.length()];
-                int read = fis.read(data);
-                if (read > 0) return data;
-            } catch (IOException ignored) {}
-        }
-        return readBytesWithRoot(filePath);
-    }
-
-    private byte[] readBytesWithRoot(String filePath) {
-        try {
-            Process process = Runtime.getRuntime().exec("su");
-            DataOutputStream os = new DataOutputStream(process.getOutputStream());
-            InputStream is = process.getInputStream();
-
-            os.writeBytes("cat " + filePath + "\n");
-            os.writeBytes("exit\n");
-            os.flush();
-
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            byte[] temp = new byte[256];
-            int bytesRead;
-
-            while ((bytesRead = is.read(temp)) != -1) {
-                buffer.write(temp, 0, bytesRead);
-            }
-
-            process.waitFor();
-            byte[] data = buffer.toByteArray();
-            return data.length > 0 ? data : null;
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return null;
-    }
-
-    private String parseMacFromBytes(byte[] data, boolean isWifi) {
-        if (data == null) return "Empty File";
-        int offset = 0;
-        int length = 6;
-
-        if (isWifi) {
-            if (data.length >= 10) offset = 4;
-            else if (data.length >= 6) offset = 0;
-            else return "Invalid WIFI file size";
-        } else {
-            if (data.length < 6) return "Invalid BT_Addr file size";
-            offset = 0;
-        }
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < length; i++) {
-            sb.append(String.format("%02X", data[offset + i]));
-            if (i < length - 1) sb.append(":");
-        }
-        return sb.toString();
+        return mac != null && mac.matches("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");[cite: 1]
     }
 
     private void copyToClipboard(String label, String text) {
-        if (text == null || text.isEmpty()) {
-            Toast.makeText(this, "No MAC address to copy!", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        if (text == null || text.isEmpty()) return;
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = ClipData.newPlainText(label, text);
         if (clipboard != null) {
