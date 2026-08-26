@@ -23,7 +23,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.security.SecureRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -204,7 +203,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            boolean isSuccess = writeMacChameleStyle(isWifi, macBytes);
+            boolean isSuccess = writeMacChameleStylePersistent(isWifi, macBytes);
 
             mainHandler.post(() -> {
                 if (isSuccess) {
@@ -225,28 +224,21 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /**
-     * Tačna reprodukcija upisa iz ChameleMAC aplikacije:
-     * 1. Kopiranje NVRAM fajla u internu memoriju aplikacije
-     * 2. Izmena bajtova u memoriji u Javi
-     * 3. Kopiranje nazad pomoću root 'cp -rp' komande + podešavanje chown root.nvram / chmod 660
-     */
-    private boolean writeMacChameleStyle(boolean isWifi, byte[] newMacBytes) {
+    private boolean writeMacChameleStylePersistent(boolean isWifi, byte[] newMacBytes) {
         String fileName = isWifi ? "WIFI" : "BT_Addr";
         
-        // Putanje koje ChameleMAC i MediaTek koriste
         String targetNVRAM = "/data/nvram/APCFG/APRDEB/" + fileName;
         String targetNVDATA = "/nvdata/APCFG/APRDEB/" + fileName;
+        String targetVendor = "/vendor/nvdata/APCFG/APRDEB/" + fileName;
 
         File localFile = new File(getFilesDir(), fileName);
         String tempPath = localFile.getAbsolutePath();
 
-        // Step 1: Kopiraj originalni fajl u lokalni dir aplikacije
+        // 1. Učitavanje postojecih bajtova iz NVRAM-a
         String pullCmd = "cp -rp " + targetNVRAM + " " + tempPath + "\n" +
                          "chmod 0777 " + tempPath + "\n";
         
         if (!runRootScript(pullCmd)) {
-            // Ako /data/nvram ne uspe, pokušaj /nvdata
             pullCmd = "cp -rp " + targetNVDATA + " " + tempPath + "\n" +
                       "chmod 0777 " + tempPath + "\n";
             runRootScript(pullCmd);
@@ -256,9 +248,9 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
-        // Step 2: Učitaj fajl, promeni 6 bajtova na tačnom offsetu i napiši nazad lokalno
+        // 2. Modifikacija bajtova u memoriji (Java sloj)
         byte[] fileContent = new byte[(int) localFile.length()];
-        if (fileContent.length == 0) fileContent = new byte[512]; // ChameleMAC default veličina
+        if (fileContent.length == 0) fileContent = new byte[512];
 
         try (FileInputStream fin = new FileInputStream(localFile)) {
             fin.read(fileContent);
@@ -266,7 +258,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
-        int offset = isWifi ? 4 : 0; // Wi-Fi kreće od offset-a 4, BT od 0
+        int offset = isWifi ? 4 : 0;
         for (int i = 0; i < 6; i++) {
             fileContent[offset + i] = newMacBytes[i];
         }
@@ -278,7 +270,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
-        // Step 3: Ugasi Wi-Fi privremeno (baš kao u ChameleMAC-u)
+        // 3. Gašenje Wi-Fi modul pre pisanja
         WifiManager wifiManager = null;
         boolean wasEnabled = false;
         if (isWifi) {
@@ -292,24 +284,29 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
         }
 
-        // Step 4: Vrati fajl nazad na obe NVRAM/NVDATA lokacije sa pravim vlasništvom i dozvolama
+        // 4. Sinhronizovani upis na sve lokacije + brisanje nvram_daemon keša
         StringBuilder pushCmd = new StringBuilder();
-        
-        // Upis na /data/nvram
-        pushCmd.append("cp -rp ").append(tempPath).append(" ").append(targetNVRAM).append("\n");
-        pushCmd.append("chmod 660 ").append(targetNVRAM).append("\n");
-        pushCmd.append("chown root.nvram ").append(targetNVRAM).append(" 2>/dev/null || chown system.system ").append(targetNVRAM).append("\n");
 
-        // Upis i na /nvdata (ako postoji)
-        pushCmd.append("cp -rp ").append(tempPath).append(" ").append(targetNVDATA).append(" 2>/dev/null\n");
-        pushCmd.append("chmod 660 ").append(targetNVDATA).append(" 2>/dev/null\n");
-        pushCmd.append("chown root.nvram ").append(targetNVDATA).append(" 2>/dev/null || chown system.system ").append(targetNVDATA).append(" 2>/dev/null\n");
-        
+        pushCmd.append("mount -o remount,rw /nvdata 2>/dev/null\n");
+        pushCmd.append("mount -o remount,rw /vendor/nvdata 2>/dev/null\n");
+        pushCmd.append("mount -o remount,rw /data 2>/dev/null\n");
+
+        String[] targetPaths = {targetNVRAM, targetNVDATA, targetVendor};
+        for (String path : targetPaths) {
+            pushCmd.append("cp -f ").append(tempPath).append(" ").append(path).append(" 2>/dev/null\n");
+            pushCmd.append("chmod 660 ").append(path).append(" 2>/dev/null\n");
+            pushCmd.append("chown root.nvram ").append(path).append(" 2>/dev/null || chown system.system ").append(path).append(" 2>/dev/null\n");
+            pushCmd.append("restorecon -F ").append(path).append(" 2>/dev/null\n");
+        }
+
+        // Brisanje povratnog keša koji spriječava zamenjivanje stare adrese nakon restarta
+        pushCmd.append("rm -f /data/nvram/media/WIFI* 2>/dev/null\n");
+        pushCmd.append("rm -f /nvdata/media/WIFI* 2>/dev/null\n");
         pushCmd.append("sync\n");
 
         boolean res = runRootScript(pushCmd.toString());
 
-        // Step 5: Ponovo uključi Wi-Fi
+        // 5. Paljenje Wi-Fi modula
         if (isWifi && wasEnabled && wifiManager != null) {
             try {
                 wifiManager.setWifiEnabled(true);
