@@ -245,9 +245,16 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
 
             ArrayList<String> cmds = new ArrayList<>();
+            // Upis na primarnu lokaciju
             cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
+            
+            // Upis na nvdata ako postoji na sistemu (za perzistentnost na nekim MTK ROM-ovima)
+            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/WIFI");
+            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/WIFI");
+            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/WIFI");
+            
             executeRootCmds(cmds);
 
             if (wifiEnabled && wifi != null) {
@@ -268,9 +275,9 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
-            // Koristimo dd za sigurno kopiranje sirovih bajtova iz NVRAM-a
+            // Provereno čitanje sa izričitim dvanjem dozvola nad prekopiranim fajlom
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("dd if=/data/nvram/APCFG/APRDEB/BT_ADDR of=" + destPath + " bs=512 count=1 2>/dev/null || cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
+            cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
@@ -335,14 +342,13 @@ public class MainActivity extends AppCompatActivity {
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
-            // 1. Pročitamo postojeći lokalni fajl da sačuvamo strukturu
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     fin.read(fileContent);
                 } catch (IOException ignored) {}
             }
 
-            // 2. Zamenimo samo prvih 6 bajtova na indeksima 0 do 5
+            // Izmena prvih 6 bajtova
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -350,7 +356,6 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 3. Zapišemo izmenjeni sadržaj lokalno
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
             } catch (IOException e) {
@@ -358,14 +363,25 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 4. Vraćamo izmenjeni fajl u NVRAM
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("dd if=" + destPath + " of=/data/nvram/APCFG/APRDEB/BT_ADDR bs=512 count=1 2>/dev/null || cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            
+            // 1. Upis u primarnu NVRAM lokaciju
+            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
+
+            // 2. Upis u /nvdata/ (ako postoji, što sprečava pregazivanje pri restartu)
+            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
+            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
+            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
+
+            // 3. Brisanje MTK NVRAM keša (primorava drajver da ucita novu adresu umesto keširane)
+            cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
+            cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
+
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed! Restart Bluetooth or reboot device.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully!", Toast.LENGTH_LONG).show());
         });
     }
 
