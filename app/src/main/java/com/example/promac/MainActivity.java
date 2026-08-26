@@ -67,7 +67,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Auto-format unosa
+        // Auto-format unosa u obliki XX:XX:XX:XX:XX:XX
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
@@ -138,17 +138,18 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
+            File localFile = new File(destPath);
+            if (localFile.exists()) localFile.delete();
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/WIFI " + destPath);
-            cmds.add("chmod 0777 " + destPath);
+            cmds.add("cat /data/nvram/APCFG/APRDEB/WIFI > " + destPath);
+            cmds.add("chmod 777 " + destPath);
             executeRootCmds(cmds);
 
-            File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            if (localFile.exists()) {
+            if (localFile.exists() && localFile.length() > 0) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int read = fin.read(fileContent);
                     if (read >= 10) {
@@ -245,14 +246,9 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
+            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
-
-            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
-            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
-            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
-
             executeRootCmds(cmds);
 
             if (wifiEnabled && wifi != null) {
@@ -272,17 +268,18 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
+            File localFile = new File(destPath);
+            if (localFile.exists()) localFile.delete();
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath + " 2>/dev/null || cp -rp /data/nvdata/APCFG/APRDEB/BT_ADDR " + destPath);
-            cmds.add("chmod 0777 " + destPath);
+            cmds.add("cat /data/nvram/APCFG/APRDEB/BT_ADDR > " + destPath);
+            cmds.add("chmod 777 " + destPath);
             executeRootCmds(cmds);
 
-            File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            if (localFile.exists()) {
+            if (localFile.exists() && localFile.length() > 0) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
                     if (bytesRead >= 6) {
@@ -302,8 +299,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Na većini MTK BT_ADDR adresa počinje od bajta 0. 
-                // Ako primetiš obrnute bajtove, promeni u: data[5], data[4], data[3], data[2], data[1], data[0]
+                // MTK BT_ADDR adresa se nalazi na indeksima od 0 do 5
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -361,17 +357,12 @@ public class MainActivity extends AppCompatActivity {
             }
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
-
-            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
-            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
-            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
-
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully. Restart Bluetooth or reboot device.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed! Restart Bluetooth or reboot device.", Toast.LENGTH_LONG).show());
         });
     }
 
