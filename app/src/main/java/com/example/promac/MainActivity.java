@@ -20,8 +20,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.security.SecureRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -114,7 +116,6 @@ public class MainActivity extends AppCompatActivity {
         byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
 
-        // Postavljanje lokalno administriranog (LAA) bita
         macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
 
         StringBuilder sb = new StringBuilder();
@@ -203,50 +204,11 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            String fileName = isWifi ? "WIFI" : "BT_Addr";
-            String[] targetPaths = {
-                "/nvdata/APCFG/APRDEB/" + fileName,
-                "/data/nvram/APCFG/APRDEB/" + fileName,
-                "/vendor/nvdata/APCFG/APRDEB/" + fileName
-            };
+            boolean isSuccess = writeMacChameleStyle(isWifi, macBytes);
 
-            // 1. Potpuno gašenje Wi-Fi radija da drajver ne drži datoteku zaključanom
-            if (isWifi) {
-                try {
-                    WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                    if (wifiManager != null && wifiManager.isWifiEnabled()) {
-                        wifiManager.setWifiEnabled(false);
-                        Thread.sleep(1500);
-                    }
-                } catch (Exception ignored) {}
-            }
-
-            // 2. Izvršavanje upisa nad svim detektovanim NVRAM stazama
-            boolean anySuccess = false;
-            for (String path : targetPaths) {
-                if (new File(path).exists() || path.startsWith("/nvdata")) {
-                    if (writeMacToMtkFile(path, macBytes, isWifi)) {
-                        anySuccess = true;
-                    }
-                }
-            }
-
-            final boolean isSuccess = anySuccess;
-
-            // 3. Ponovno uključivanje Wi-Fi radija radi ponovnog učitavanja NVRAM-a
-            if (isWifi) {
-                try {
-                    WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                    if (wifiManager != null) {
-                        wifiManager.setWifiEnabled(true);
-                    }
-                } catch (Exception ignored) {}
-            }
-
-            // 4. Osvežavanje UI elemenata na glavnoj niti
             mainHandler.post(() -> {
                 if (isSuccess) {
-                    Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC successfully written!", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
                     if (isWifi) {
                         currentWifiMac = rawMac;
                         targetView.setText("Write WiFi Mac:\n" + rawMac);
@@ -257,38 +219,104 @@ public class MainActivity extends AppCompatActivity {
                         btnCopyBt.setEnabled(true);
                     }
                 } else {
-                    Toast.makeText(MainActivity.this, "Failed to write MAC. Verify Root and NVRAM path.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "Failed to write MAC. Verify Root.", Toast.LENGTH_LONG).show();
                 }
             });
         });
     }
 
-    private boolean writeMacToMtkFile(String filePath, byte[] macBytes, boolean isWifi) {
-        int offset = isWifi ? 4 : 0; // Offset 4 za Wi-Fi, offset 0 za Bluetooth
-        StringBuilder cmdBuilder = new StringBuilder();
+    /**
+     * Tačna reprodukcija upisa iz ChameleMAC aplikacije:
+     * 1. Kopiranje NVRAM fajla u internu memoriju aplikacije
+     * 2. Izmena bajtova u memoriji u Javi
+     * 3. Kopiranje nazad pomoću root 'cp -rp' komande + podešavanje chown root.nvram / chmod 660
+     */
+    private boolean writeMacChameleStyle(boolean isWifi, byte[] newMacBytes) {
+        String fileName = isWifi ? "WIFI" : "BT_Addr";
+        
+        // Putanje koje ChameleMAC i MediaTek koriste
+        String targetNVRAM = "/data/nvram/APCFG/APRDEB/" + fileName;
+        String targetNVDATA = "/nvdata/APCFG/APRDEB/" + fileName;
 
-        // Remount particija za pisanje
-        cmdBuilder.append("mount -o remount,rw /nvdata 2>/dev/null\n");
-        cmdBuilder.append("mount -o remount,rw /data 2>/dev/null\n");
+        File localFile = new File(getFilesDir(), fileName);
+        String tempPath = localFile.getAbsolutePath();
 
-        // Otključavanje fajla
-        cmdBuilder.append("chmod 666 ").append(filePath).append("\n");
-
-        // Upis bajtova korišćenjem echo -ne umesto printf cevovoda
-        for (int i = 0; i < 6; i++) {
-            int byteVal = macBytes[i] & 0xFF;
-            int targetOffset = offset + i;
-            cmdBuilder.append(String.format("echo -ne '\\x%02X' | dd of=%s bs=1 seek=%d conv=notrunc 2>/dev/null\n",
-                    byteVal, filePath, targetOffset));
+        // Step 1: Kopiraj originalni fajl u lokalni dir aplikacije
+        String pullCmd = "cp -rp " + targetNVRAM + " " + tempPath + "\n" +
+                         "chmod 0777 " + tempPath + "\n";
+        
+        if (!runRootScript(pullCmd)) {
+            // Ako /data/nvram ne uspe, pokušaj /nvdata
+            pullCmd = "cp -rp " + targetNVDATA + " " + tempPath + "\n" +
+                      "chmod 0777 " + tempPath + "\n";
+            runRootScript(pullCmd);
         }
 
-        // Restauracija MTK dozvola i keša
-        cmdBuilder.append("chmod 660 ").append(filePath).append("\n");
-        cmdBuilder.append("chown system:system ").append(filePath).append(" 2>/dev/null || chown root:nvram ").append(filePath).append(" 2>/dev/null\n");
-        cmdBuilder.append("sync\n");
-        cmdBuilder.append("restorecon -F ").append(filePath).append("\n");
+        if (!localFile.exists()) {
+            return false;
+        }
 
-        return runRootScript(cmdBuilder.toString());
+        // Step 2: Učitaj fajl, promeni 6 bajtova na tačnom offsetu i napiši nazad lokalno
+        byte[] fileContent = new byte[(int) localFile.length()];
+        if (fileContent.length == 0) fileContent = new byte[512]; // ChameleMAC default veličina
+
+        try (FileInputStream fin = new FileInputStream(localFile)) {
+            fin.read(fileContent);
+        } catch (IOException e) {
+            return false;
+        }
+
+        int offset = isWifi ? 4 : 0; // Wi-Fi kreće od offset-a 4, BT od 0
+        for (int i = 0; i < 6; i++) {
+            fileContent[offset + i] = newMacBytes[i];
+        }
+
+        try (FileOutputStream fout = new FileOutputStream(localFile)) {
+            fout.write(fileContent);
+            fout.flush();
+        } catch (IOException e) {
+            return false;
+        }
+
+        // Step 3: Ugasi Wi-Fi privremeno (baš kao u ChameleMAC-u)
+        WifiManager wifiManager = null;
+        boolean wasEnabled = false;
+        if (isWifi) {
+            try {
+                wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                if (wifiManager != null && wifiManager.isWifiEnabled()) {
+                    wasEnabled = true;
+                    wifiManager.setWifiEnabled(false);
+                    Thread.sleep(1000);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // Step 4: Vrati fajl nazad na obe NVRAM/NVDATA lokacije sa pravim vlasništvom i dozvolama
+        StringBuilder pushCmd = new StringBuilder();
+        
+        // Upis na /data/nvram
+        pushCmd.append("cp -rp ").append(tempPath).append(" ").append(targetNVRAM).append("\n");
+        pushCmd.append("chmod 660 ").append(targetNVRAM).append("\n");
+        pushCmd.append("chown root.nvram ").append(targetNVRAM).append(" 2>/dev/null || chown system.system ").append(targetNVRAM).append("\n");
+
+        // Upis i na /nvdata (ako postoji)
+        pushCmd.append("cp -rp ").append(tempPath).append(" ").append(targetNVDATA).append(" 2>/dev/null\n");
+        pushCmd.append("chmod 660 ").append(targetNVDATA).append(" 2>/dev/null\n");
+        pushCmd.append("chown root.nvram ").append(targetNVDATA).append(" 2>/dev/null || chown system.system ").append(targetNVDATA).append(" 2>/dev/null\n");
+        
+        pushCmd.append("sync\n");
+
+        boolean res = runRootScript(pushCmd.toString());
+
+        // Step 5: Ponovo uključi Wi-Fi
+        if (isWifi && wasEnabled && wifiManager != null) {
+            try {
+                wifiManager.setWifiEnabled(true);
+            } catch (Exception ignored) {}
+        }
+
+        return res;
     }
 
     private boolean runRootScript(String script) {
