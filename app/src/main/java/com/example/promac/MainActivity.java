@@ -41,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
     private EditText etBtMac;
     private Button btnWriteBt, btnCopyBt;
     private String currentBtMac = "";
+    private String activeBtPath = "/data/nvram/APCFG/APRDEB/BT_ADDR"; // Podrazumevana putanja
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -50,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Inicijalizacija Wi-Fi elemenata
+        // UI Wi-Fi
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
         cbGenOnReset = findViewById(R.id.cbGenOnReset);
@@ -59,7 +60,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        // Inicijalizacija Bluetooth elemenata
+        // UI Bluetooth
         tvBtResult = findViewById(R.id.tvBtResult);
         etBtMac = findViewById(R.id.etBtMac);
         Button btnReadBt = findViewById(R.id.btnReadBt);
@@ -82,9 +83,9 @@ public class MainActivity extends AppCompatActivity {
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
         btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
 
-        // Dugi pritisak na Bluetooth rezultat kopira kompletan dijagnostički log u clipboard
+        // Dugi pritisak kopira tekst iz rezultata
         tvBtResult.setOnLongClickListener(v -> {
-            copyToClipboard("BT Diagnostic Log", tvBtResult.getText().toString());
+            copyToClipboard("BT Status", tvBtResult.getText().toString());
             return true;
         });
     }
@@ -272,71 +273,74 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ==================== BLUETOOTH LOGIKA (SA DIJAGNOSTIKOM) ====================
+    // ==================== BLUETOOTH LOGIKA ====================
 
     private void readBtMacAddress() {
-        tvBtResult.setText("Reading & Diagnosing...");
+        tvBtResult.setText("Reading Bluetooth...");
 
         executor.execute(() -> {
-            StringBuilder log = new StringBuilder();
-            String srcPath = "/data/nvram/APCFG/APRDEB/BT_ADDR";
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
-            log.append("--- BT DIAGNOSTIC LOG ---\n");
+            // Moguće lokacije Bluetooth NVRAM fajla na MediaTek čipsetovima
+            String[] possiblePaths = new String[]{
+                "/data/nvram/APCFG/APRDEB/BT_ADDR",
+                "/nvdata/APCFG/APRDEB/BT_ADDR",
+                "/data/nvram/APCFG/APRDEB/BT",
+                "/nvdata/APCFG/APRDEB/BT",
+                "/data/nvram/md/NVRAM/NVD_DATA/BT_ADDR"
+            };
 
-            // 1. Provera postojanja i dozvola izvornog fajla
-            ArrayList<String> checkCmds = new ArrayList<>();
-            checkCmds.add("ls -l " + srcPath);
-            boolean rootAvailable = executeRootCmds(checkCmds);
-            log.append("Root Execution: ").append(rootAvailable ? "OK" : "FAILED (No Root?)").append("\n");
+            boolean foundAndCopied = false;
+            String matchedPath = "";
 
-            // 2. Kopiranje uz dd fallback
-            ArrayList<String> copyCmds = new ArrayList<>();
-            copyCmds.add("dd if=" + srcPath + " of=" + destPath + " bs=6 count=1 2>/dev/null || cp -f " + srcPath + " " + destPath);
-            copyCmds.add("chmod 666 " + destPath);
-            executeRootCmds(copyCmds);
+            for (String srcPath : possiblePaths) {
+                // Brisanje prethodnog pokušaja ako je postojao
+                File oldLocal = new File(destPath);
+                if (oldLocal.exists()) {
+                    oldLocal.delete();
+                }
 
-            // 3. Provera lokalnog fajla
-            File localFile = new File(destPath);
-            log.append("Local File Exists: ").append(localFile.exists()).append("\n");
+                ArrayList<String> cmds = new ArrayList<>();
+                cmds.add("dd if=" + srcPath + " of=" + destPath + " bs=6 count=1 2>/dev/null || cp -f " + srcPath + " " + destPath);
+                cmds.add("chmod 666 " + destPath);
+                executeRootCmds(cmds);
 
-            if (localFile.exists()) {
-                log.append("Local File Length: ").append(localFile.length()).append(" bytes\n");
+                File localFile = new File(destPath);
+                if (localFile.exists() && localFile.length() >= 6) {
+                    foundAndCopied = true;
+                    matchedPath = srcPath;
+                    break;
+                }
             }
 
+            File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
-            int bytesRead = -1;
 
-            // 4. Čitanje bajtova
-            if (localFile.exists()) {
+            if (foundAndCopied && localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
-                    bytesRead = fin.read(fileContent);
-                    log.append("Bytes Read: ").append(bytesRead).append("\n");
+                    int bytesRead = fin.read(fileContent);
                     if (bytesRead >= 6) {
                         readSuccess = true;
-                    } else {
-                        log.append("FAIL REASON: Read less than 6 bytes\n");
                     }
-                } catch (IOException e) {
-                    log.append("FAIL REASON: Java Exception -> ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
-                }
-            } else {
-                log.append("FAIL REASON: File does not exist after copy command\n");
+                } catch (IOException ignored) {}
             }
 
             final boolean success = readSuccess;
             final byte[] data = fileContent;
-            final String diagnosticOutput = log.toString();
+            final String validPath = matchedPath;
 
             mainHandler.post(() -> {
                 if (!success) {
-                    tvBtResult.setText(diagnosticOutput + "\n(Long-click to copy log)");
+                    tvBtResult.setText("Bluetooth Mac:\nFile not found in NVRAM");
                     btnWriteBt.setEnabled(false);
                     btnCopyBt.setEnabled(false);
                     return;
                 }
 
+                activeBtPath = validPath;
+
+                // Bluetooth MAC se čita od bajta 0 do 5
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -372,6 +376,7 @@ public class MainActivity extends AppCompatActivity {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
             byte[] fileContent = new byte[6];
 
+            // Pisanje bajtova direktno od indeksa 0
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -387,14 +392,18 @@ public class MainActivity extends AppCompatActivity {
             }
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("dd if=" + destPath + " of=/data/nvram/APCFG/APRDEB/BT_ADDR bs=6 count=1 2>/dev/null || cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
-            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
-            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
+            
+            // Upis na detektovanu aktivnu putanju
+            cmds.add("dd if=" + destPath + " of=" + activeBtPath + " bs=6 count=1 2>/dev/null || cp -f " + destPath + " " + activeBtPath);
+            cmds.add("chmod 660 " + activeBtPath);
+            cmds.add("chown root.nvram " + activeBtPath);
 
+            // Sinhronizacija sa rezervnom /nvdata/ kopijom ako postoji
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
 
+            // Brisanje NVRAM keširanja
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
 
