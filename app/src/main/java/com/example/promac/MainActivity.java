@@ -67,7 +67,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Auto-format unosa za obe sekcije
+        // Auto-format unosa
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
@@ -150,8 +150,10 @@ public class MainActivity extends AppCompatActivity {
 
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fin.read(fileContent);
-                    readSuccess = true;
+                    int read = fin.read(fileContent);
+                    if (read >= 10) {
+                        readSuccess = true;
+                    }
                 } catch (IOException ignored) {}
             }
 
@@ -213,11 +215,10 @@ public class MainActivity extends AppCompatActivity {
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
-            try (FileInputStream fin = new FileInputStream(localFile)) {
-                fin.read(fileContent);
-            } catch (IOException e) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());
-                return;
+            if (localFile.exists()) {
+                try (FileInputStream fin = new FileInputStream(localFile)) {
+                    fin.read(fileContent);
+                } catch (IOException ignored) {}
             }
 
             fileContent[4] = hexToByte(b[0]);
@@ -247,6 +248,11 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
+
+            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
+            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
+            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
+
             executeRootCmds(cmds);
 
             if (wifiEnabled && wifi != null) {
@@ -268,7 +274,7 @@ public class MainActivity extends AppCompatActivity {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
+            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath + " 2>/dev/null || cp -rp /data/nvdata/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
@@ -278,8 +284,10 @@ public class MainActivity extends AppCompatActivity {
 
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fin.read(fileContent);
-                    readSuccess = true;
+                    int bytesRead = fin.read(fileContent);
+                    if (bytesRead >= 6) {
+                        readSuccess = true;
+                    }
                 } catch (IOException ignored) {}
             }
 
@@ -294,9 +302,10 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Bluetooth bajtovi u BT_ADDR idu na indeksima 0 do 5 (obrnuto/Little-Endian)
+                // Na većini MTK BT_ADDR adresa počinje od bajta 0. 
+                // Ako primetiš obrnute bajtove, promeni u: data[5], data[4], data[3], data[2], data[1], data[0]
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                        data[5], data[4], data[3], data[2], data[1], data[0]);
+                        data[0], data[1], data[2], data[3], data[4], data[5]);
 
                 currentBtMac = mac;
                 tvBtResult.setText("Read Bluetooth Mac:\n" + mac);
@@ -331,20 +340,18 @@ public class MainActivity extends AppCompatActivity {
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
-            try (FileInputStream fin = new FileInputStream(localFile)) {
-                fin.read(fileContent);
-            } catch (IOException e) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing.", Toast.LENGTH_SHORT).show());
-                return;
+            if (localFile.exists()) {
+                try (FileInputStream fin = new FileInputStream(localFile)) {
+                    fin.read(fileContent);
+                } catch (IOException ignored) {}
             }
 
-            // Upisivanje od indeksa 0 do 5 u obrnutom redosledu
-            fileContent[0] = hexToByte(b[5]);
-            fileContent[1] = hexToByte(b[4]);
-            fileContent[2] = hexToByte(b[3]);
-            fileContent[3] = hexToByte(b[2]);
-            fileContent[4] = hexToByte(b[1]);
-            fileContent[5] = hexToByte(b[0]);
+            fileContent[0] = hexToByte(b[0]);
+            fileContent[1] = hexToByte(b[1]);
+            fileContent[2] = hexToByte(b[2]);
+            fileContent[3] = hexToByte(b[3]);
+            fileContent[4] = hexToByte(b[4]);
+            fileContent[5] = hexToByte(b[5]);
 
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
@@ -357,9 +364,14 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
+
+            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
+            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
+            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
+
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully. Restart Bluetooth to apply.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully. Restart Bluetooth or reboot device.", Toast.LENGTH_LONG).show());
         });
     }
 
