@@ -172,7 +172,6 @@ public class MainActivity extends AppCompatActivity {
                     cbGenOnReset.setChecked(true);
                 }
 
-                // Wi-Fi MAC adresa se nalazi na indeksima 4 do 9
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[4], data[5], data[6], data[7], data[8], data[9]);
 
@@ -247,17 +246,15 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
 
             ArrayList<String> cmds = new ArrayList<>();
-            // Upis na primarnu lokaciju
             cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
             
-            // Upis u /nvdata ako postoji (trajno sprečava re-sync na stare podatke)
+            // Sinhronizacija sa /nvdata za perzistentnost
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/WIFI");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/WIFI");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/WIFI");
 
-            // Brisanje eventualnih keš fajlova
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/WIFI.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/WIFI*");
             
@@ -282,6 +279,7 @@ public class MainActivity extends AppCompatActivity {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
             ArrayList<String> cmds = new ArrayList<>();
+            // Kopiranje i otvaranje dozvola za app folder
             cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 666 " + destPath);
             executeRootCmds(cmds);
@@ -290,7 +288,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            // BT_ADDR zahteva minimum 6 bajtova (indeksi 0 do 5)
+            // BT_ADDR zahteva provereu na minimum 6 bajtova
             if (localFile.exists() && localFile.length() >= 6) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
@@ -311,7 +309,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Bluetooth MAC adresa se nalazi na indeksima 0 do 5
+                // Bluetooth adresa je na bajtovima 0 do 5
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -354,7 +352,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException ignored) {}
             }
 
-            // Upis bajtova na indekse 0-5
+            // Upis u bajtove 0-5
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -372,17 +370,17 @@ public class MainActivity extends AppCompatActivity {
 
             ArrayList<String> cmds = new ArrayList<>();
             
-            // 1. Upis u primarnu NVRAM lokaciju
+            // 1. Primarni NVRAM upis
             cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
 
-            // 2. Upis u /nvdata/ (master rezervna kopija koja se proverava pri restartu)
+            // 2. Upis u /nvdata/ rezervnu kopiju (sprečava re-sync sa starom adresom pri boot-u)
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
 
-            // 3. Brisanje keširanih fajlova
+            // 3. Brisanje MTK NVRAM keširanih fajlova
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
 
