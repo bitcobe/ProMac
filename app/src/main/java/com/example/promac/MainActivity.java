@@ -141,14 +141,14 @@ public class MainActivity extends AppCompatActivity {
 
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("cp -f /data/nvram/APCFG/APRDEB/WIFI " + destPath);
-            cmds.add("chmod 0777 " + destPath);
+            cmds.add("chmod 666 " + destPath);
             executeRootCmds(cmds);
 
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            if (localFile.exists() && localFile.length() > 0) {
+            if (localFile.exists() && localFile.length() >= 10) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int read = fin.read(fileContent);
                     if (read >= 10) {
@@ -172,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
                     cbGenOnReset.setChecked(true);
                 }
 
+                // Wi-Fi MAC adresa se nalazi na indeksima 4 do 9
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[4], data[5], data[6], data[7], data[8], data[9]);
 
@@ -229,7 +230,8 @@ public class MainActivity extends AppCompatActivity {
             fileContent[9] = hexToByte(b[5]);
 
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                file.write(fileContent);
+                int writeLength = (localFile.length() > 10) ? (int) localFile.length() : 512;
+                file.write(fileContent, 0, writeLength);
             } catch (IOException e) {
                 mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
@@ -250,10 +252,14 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
             
-            // Upis na nvdata ako postoji na sistemu (za perzistentnost na nekim MTK ROM-ovima)
+            // Upis u /nvdata ako postoji (trajno sprečava re-sync na stare podatke)
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/WIFI");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/WIFI");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/WIFI");
+
+            // Brisanje eventualnih keš fajlova
+            cmds.add("rm -f /data/nvram/APCFG/APRDEB/WIFI.bak");
+            cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/WIFI*");
             
             executeRootCmds(cmds);
 
@@ -275,17 +281,17 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
-            // Provereno čitanje sa izričitim dvanjem dozvola nad prekopiranim fajlom
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
-            cmds.add("chmod 0777 " + destPath);
+            cmds.add("chmod 666 " + destPath);
             executeRootCmds(cmds);
 
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            if (localFile.exists() && localFile.length() > 0) {
+            // BT_ADDR zahteva minimum 6 bajtova (indeksi 0 do 5)
+            if (localFile.exists() && localFile.length() >= 6) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
                     if (bytesRead >= 6) {
@@ -305,7 +311,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Bluetooth adresa je na samom početku fajla (indeksi 0 do 5)
+                // Bluetooth MAC adresa se nalazi na indeksima 0 do 5
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -348,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException ignored) {}
             }
 
-            // Izmena prvih 6 bajtova
+            // Upis bajtova na indekse 0-5
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -357,7 +363,8 @@ public class MainActivity extends AppCompatActivity {
             fileContent[5] = hexToByte(b[5]);
 
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                file.write(fileContent);
+                int writeLength = (localFile.length() >= 6) ? (int) localFile.length() : 6;
+                file.write(fileContent, 0, writeLength);
             } catch (IOException e) {
                 mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
@@ -370,12 +377,12 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
 
-            // 2. Upis u /nvdata/ (ako postoji, što sprečava pregazivanje pri restartu)
+            // 2. Upis u /nvdata/ (master rezervna kopija koja se proverava pri restartu)
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
 
-            // 3. Brisanje MTK NVRAM keša (primorava drajver da ucita novu adresu umesto keširane)
+            // 3. Brisanje keširanih fajlova
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
 
