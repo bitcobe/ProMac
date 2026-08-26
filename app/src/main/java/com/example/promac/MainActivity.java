@@ -17,13 +17,11 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
@@ -99,10 +97,15 @@ public class MainActivity extends AppCompatActivity {
 
     private String generateRandomMac() {
         SecureRandom random = new SecureRandom();
-        byte[] b = new byte[5];
-        random.nextBytes(b);
+        byte[] macBytes = new byte[6];
+        random.nextBytes(macBytes);
 
-        return String.format("AA:%02X:%02X:%02X:%02X:%02X", b[0], b[1], b[2], b[3], b[4]);
+        // Osigurava da je MAC adresa validna lokalno administrirana Unicast adresa
+        macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
+
+        return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
+                macBytes[0], macBytes[1], macBytes[2],
+                macBytes[3], macBytes[4], macBytes[5]);
     }
 
     private void readMacAddress() {
