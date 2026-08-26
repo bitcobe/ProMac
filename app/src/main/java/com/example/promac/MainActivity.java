@@ -51,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Auto formatting with ':' for input fields
+        // Auto formatting sa ':' za polja za unos
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
@@ -244,6 +244,16 @@ public class MainActivity extends AppCompatActivity {
             hexString.append(String.format("\\x%02X", b));
         }
 
+        // Ako je u pitanju Wi-Fi, upisujemo i u /sys/class/net/wlan0/address
+        if (isWifi) {
+            StringBuilder formattedMac = new StringBuilder();
+            for (int i = 0; i < 6; i++) {
+                formattedMac.append(String.format("%02X", macBytes[i]));
+                if (i < 5) formattedMac.append(":");
+            }
+            writeSysClassWifiAddress(formattedMac.toString());
+        }
+
         try {
             Process process = Runtime.getRuntime().exec("su");
             DataOutputStream os = new DataOutputStream(process.getOutputStream());
@@ -256,6 +266,25 @@ public class MainActivity extends AppCompatActivity {
             return process.exitValue() == 0;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private void writeSysClassWifiAddress(String macAddress) {
+        String sysPath = "/sys/class/net/wlan0/address";
+        try {
+            Process process = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(process.getOutputStream());
+            
+            // Postavljanje privremene upisivosti
+            os.writeBytes("chmod 0644 " + sysPath + "\n");
+            os.writeBytes("echo '" + macAddress + "' > " + sysPath + "\n");
+            // Vraćanje na tražene 0444 (read-only) dozvole
+            os.writeBytes("chmod 0444 " + sysPath + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            process.waitFor();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
