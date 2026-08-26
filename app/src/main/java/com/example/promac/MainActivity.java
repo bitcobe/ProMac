@@ -50,7 +50,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 1. Inicijalizacija Wi-Fi elemenata
+        // UI Wi-Fi
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
         cbGenOnReset = findViewById(R.id.cbGenOnReset);
@@ -59,7 +59,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        // 2. Inicijalizacija Bluetooth elemenata
+        // UI Bluetooth
         tvBtResult = findViewById(R.id.tvBtResult);
         etBtMac = findViewById(R.id.etBtMac);
         Button btnReadBt = findViewById(R.id.btnReadBt);
@@ -67,17 +67,14 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Auto-format unosa u obliku XX:XX:XX:XX:XX:XX
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
-        // Wi-Fi Akcije
         btnReadWifi.setOnClickListener(v -> readMacAddress());
         btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress());
         btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
         btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
 
-        // Bluetooth Akcije
         btnReadBt.setOnClickListener(v -> readBtMacAddress());
         btnWriteBt.setOnClickListener(v -> confirmWriteBtMacAddress());
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
@@ -122,8 +119,6 @@ public class MainActivity extends AppCompatActivity {
         SecureRandom random = new SecureRandom();
         byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
-
-        // Unicast + Locally Administered MAC adresa
         macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
 
         return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
@@ -250,7 +245,6 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
             
-            // Sinhronizacija sa /nvdata za perzistentnost
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/WIFI");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/WIFI");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/WIFI");
@@ -278,9 +272,9 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
+            // dd osigurava čitanje zakrenutog ili malog binarnog fajla
             ArrayList<String> cmds = new ArrayList<>();
-            // Kopiranje i otvaranje dozvola za app folder
-            cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
+            cmds.add("dd if=/data/nvram/APCFG/APRDEB/BT_ADDR of=" + destPath + " bs=512 count=1 2>/dev/null || cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 666 " + destPath);
             executeRootCmds(cmds);
 
@@ -288,7 +282,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            // BT_ADDR zahteva provereu na minimum 6 bajtova
+            // BT_ADDR zahteva provereu na minimum 6 bajtova (indeksi 0-5)
             if (localFile.exists() && localFile.length() >= 6) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
@@ -352,7 +346,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException ignored) {}
             }
 
-            // Upis u bajtove 0-5
+            // Upis novih bajtova na indeks 0-5
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -370,17 +364,17 @@ public class MainActivity extends AppCompatActivity {
 
             ArrayList<String> cmds = new ArrayList<>();
             
-            // 1. Primarni NVRAM upis
-            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            // 1. Primarni NVRAM upis preko dd / cp
+            cmds.add("dd if=" + destPath + " of=/data/nvram/APCFG/APRDEB/BT_ADDR bs=512 count=1 2>/dev/null || cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
 
-            // 2. Upis u /nvdata/ rezervnu kopiju (sprečava re-sync sa starom adresom pri boot-u)
+            // 2. Upis u /nvdata/ rezervnu kopiju (sprečava vraćanje na staro pri restartu)
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
 
-            // 3. Brisanje MTK NVRAM keširanih fajlova
+            // 3. Brisanje keš fajlova
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
 
