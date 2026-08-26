@@ -36,7 +36,6 @@ public class MainActivity extends AppCompatActivity {
     private String currentWifiMac = "";
     private String currentBtMac = "";
 
-    // Executor za rad u pozadinskoj niti da se spreči pucanje aplikacije (UI freeze)
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -115,7 +114,7 @@ public class MainActivity extends AppCompatActivity {
         byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
 
-        // Postavljanje LAA bita (locally administered)
+        // Postavljanje lokalno administriranog (LAA) bita
         macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
 
         StringBuilder sb = new StringBuilder();
@@ -205,26 +204,36 @@ public class MainActivity extends AppCompatActivity {
             }
 
             String fileName = isWifi ? "WIFI" : "BT_Addr";
-            String primaryPath = "/nvdata/APCFG/APRDEB/" + fileName;
-            String secondaryPath = "/data/nvram/APCFG/APRDEB/" + fileName;
+            String[] targetPaths = {
+                "/nvdata/APCFG/APRDEB/" + fileName,
+                "/data/nvram/APCFG/APRDEB/" + fileName,
+                "/vendor/nvdata/APCFG/APRDEB/" + fileName
+            };
 
-            // Bezbedno gašenje Wi-Fi radija bez rušenja aplikacije
+            // 1. Privremeno gašenje Wi-Fi radija radi oslobađanja keša u drajveru
             if (isWifi) {
                 try {
                     WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
                     if (wifiManager != null && wifiManager.isWifiEnabled()) {
                         wifiManager.setWifiEnabled(false);
-                        Thread.sleep(1000);
+                        Thread.sleep(1500);
                     }
                 } catch (Exception ignored) {}
             }
 
-            boolean successPrimary = writeMacToMtkFile(primaryPath, macBytes, isWifi);
-            boolean successSecondary = writeMacToMtkFile(secondaryPath, macBytes, isWifi);
+            // 2. Upisivanje bajtova na sve postojeće lokacije
+            boolean anySuccess = false;
+            for (String path : targetPaths) {
+                if (new File(path).exists() || path.startsWith("/nvdata")) {
+                    if (writeMacToMtkFile(path, macBytes, isWifi)) {
+                        anySuccess = true;
+                    }
+                }
+            }
 
-            final boolean isSuccess = successPrimary || successSecondary;
+            final boolean isSuccess = anySuccess;
 
-            // Vraćanje Wi-Fi stanja
+            // 3. Ponovno uključivanje Wi-Fi radija
             if (isWifi) {
                 try {
                     WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
@@ -234,9 +243,10 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             }
 
+            // 4. Osvežavanje korisničkog interfejsa
             mainHandler.post(() -> {
                 if (isSuccess) {
-                    Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC successfully written!", Toast.LENGTH_LONG).show();
                     if (isWifi) {
                         currentWifiMac = rawMac;
                         targetView.setText("Write WiFi Mac:\n" + rawMac);
@@ -247,16 +257,20 @@ public class MainActivity extends AppCompatActivity {
                         btnCopyBt.setEnabled(true);
                     }
                 } else {
-                    Toast.makeText(MainActivity.this, "Failed to write MAC. Root access denied or NVRAM path missing.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "Failed to write MAC. Verify Root and NVRAM path.", Toast.LENGTH_LONG).show();
                 }
             });
         });
     }
 
     private boolean writeMacToMtkFile(String filePath, byte[] macBytes, boolean isWifi) {
-        int offset = isWifi ? 4 : 0;
+        int offset = isWifi ? 4 : 0; // Wi-Fi kreće od bajta 4, Bluetooth od bajta 0
         StringBuilder cmdBuilder = new StringBuilder();
 
+        // Otključavanje upisa
+        cmdBuilder.append("chmod 666 ").append(filePath).append("\n");
+
+        // Direktan bit-level patch preko dd komande
         for (int i = 0; i < 6; i++) {
             int byteVal = macBytes[i] & 0xFF;
             int targetOffset = offset + i;
@@ -264,9 +278,12 @@ public class MainActivity extends AppCompatActivity {
                     byteVal, filePath, targetOffset));
         }
 
+        // Restauracija MTK NVRAM vlasništva i dozvola
         cmdBuilder.append("chmod 660 ").append(filePath).append("\n");
-        cmdBuilder.append("chown root.nvram ").append(filePath).append("\n");
-        cmdBuilder.append("restorecon ").append(filePath).append("\n");
+        cmdBuilder.append("chown system:system ").append(filePath).append("\n");
+        
+        // Osvežavanje SELinux bezbednosnog konteksta
+        cmdBuilder.append("restorecon -F ").append(filePath).append("\n");
 
         return runRootScript(cmdBuilder.toString());
     }
