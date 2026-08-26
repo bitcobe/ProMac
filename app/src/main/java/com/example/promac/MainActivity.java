@@ -210,7 +210,7 @@ public class MainActivity extends AppCompatActivity {
                 "/vendor/nvdata/APCFG/APRDEB/" + fileName
             };
 
-            // 1. Privremeno gašenje Wi-Fi radija radi oslobađanja keša u drajveru
+            // 1. Potpuno gašenje Wi-Fi radija da drajver ne drži datoteku zaključanom
             if (isWifi) {
                 try {
                     WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
@@ -221,7 +221,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             }
 
-            // 2. Upisivanje bajtova na sve postojeće lokacije
+            // 2. Izvršavanje upisa nad svim detektovanim NVRAM stazama
             boolean anySuccess = false;
             for (String path : targetPaths) {
                 if (new File(path).exists() || path.startsWith("/nvdata")) {
@@ -233,7 +233,7 @@ public class MainActivity extends AppCompatActivity {
 
             final boolean isSuccess = anySuccess;
 
-            // 3. Ponovno uključivanje Wi-Fi radija
+            // 3. Ponovno uključivanje Wi-Fi radija radi ponovnog učitavanja NVRAM-a
             if (isWifi) {
                 try {
                     WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
@@ -243,7 +243,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             }
 
-            // 4. Osvežavanje korisničkog interfejsa
+            // 4. Osvežavanje UI elemenata na glavnoj niti
             mainHandler.post(() -> {
                 if (isSuccess) {
                     Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC successfully written!", Toast.LENGTH_LONG).show();
@@ -264,25 +264,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean writeMacToMtkFile(String filePath, byte[] macBytes, boolean isWifi) {
-        int offset = isWifi ? 4 : 0; // Wi-Fi kreće od bajta 4, Bluetooth od bajta 0
+        int offset = isWifi ? 4 : 0; // Offset 4 za Wi-Fi, offset 0 za Bluetooth
         StringBuilder cmdBuilder = new StringBuilder();
 
-        // Otključavanje upisa
+        // Remount particija za pisanje
+        cmdBuilder.append("mount -o remount,rw /nvdata 2>/dev/null\n");
+        cmdBuilder.append("mount -o remount,rw /data 2>/dev/null\n");
+
+        // Otključavanje fajla
         cmdBuilder.append("chmod 666 ").append(filePath).append("\n");
 
-        // Direktan bit-level patch preko dd komande
+        // Upis bajtova korišćenjem echo -ne umesto printf cevovoda
         for (int i = 0; i < 6; i++) {
             int byteVal = macBytes[i] & 0xFF;
             int targetOffset = offset + i;
-            cmdBuilder.append(String.format("printf '\\x%02X' | dd of=%s bs=1 seek=%d conv=notrunc\n",
+            cmdBuilder.append(String.format("echo -ne '\\x%02X' | dd of=%s bs=1 seek=%d conv=notrunc 2>/dev/null\n",
                     byteVal, filePath, targetOffset));
         }
 
-        // Restauracija MTK NVRAM vlasništva i dozvola
+        // Restauracija MTK dozvola i keša
         cmdBuilder.append("chmod 660 ").append(filePath).append("\n");
-        cmdBuilder.append("chown system:system ").append(filePath).append("\n");
-        
-        // Osvežavanje SELinux bezbednosnog konteksta
+        cmdBuilder.append("chown system:system ").append(filePath).append(" 2>/dev/null || chown root:nvram ").append(filePath).append(" 2>/dev/null\n");
+        cmdBuilder.append("sync\n");
         cmdBuilder.append("restorecon -F ").append(filePath).append("\n");
 
         return runRootScript(cmdBuilder.toString());
