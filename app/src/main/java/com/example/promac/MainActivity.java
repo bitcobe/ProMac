@@ -397,7 +397,7 @@ public class MainActivity extends AppCompatActivity {
                 tvBtResult.setText("Read Bluetooth Mac:\n" + finalMac);
                 btnWriteBt.setEnabled(true);
                 btnCopyBt.setEnabled(true);
-                Toast.makeText(this, "Bluetooth MAC read: " + finalMac, Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Bluetooth MAC read: " + finalMac, Toast.LENGTH_SHORT).show();
             });
         });
     }
@@ -448,7 +448,8 @@ public class MainActivity extends AppCompatActivity {
 
                 if (totalBytes < 6) {
                     errorMsg = "File too small: " + totalBytes + " bytes";
-                    mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error: " + errorMsg, Toast.LENGTH_LONG).show());
+                    final String finalErrorMsg = errorMsg;
+                    mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error: " + finalErrorMsg, Toast.LENGTH_LONG).show());
                     return;
                 }
 
