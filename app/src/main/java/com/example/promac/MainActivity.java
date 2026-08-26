@@ -17,7 +17,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -272,119 +271,109 @@ public class MainActivity extends AppCompatActivity {
         tvBtResult.setText("Reading Bluetooth MAC...");
 
         executor.execute(() -> {
-            String mac = null;
+            String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
+            byte[] fileContent = new byte[512];
             boolean readSuccess = false;
             String errorMsg = "";
 
             try {
-                // DIREKTNO ČITANJE PREKO ROOT-A - bez kopiranja fajla
-                Process process = Runtime.getRuntime().exec("su");
-                DataOutputStream os = new DataOutputStream(process.getOutputStream());
-                
-                // Koristimo dd da pročitamo prvih 6 bajtova
-                os.writeBytes("dd if=/data/nvram/APCFG/APRDEB/BT_ADDR bs=1 count=6 2>/dev/null\n");
-                os.writeBytes("exit\n");
-                os.flush();
+                // Prvo pokušaj da kopiraš fajl (isto kao za Wi-Fi)
+                ArrayList<String> cmds = new ArrayList<>();
+                cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath + " 2>/dev/null");
+                cmds.add("chmod 0777 " + destPath);
+                executeRootCmds(cmds);
 
-                // Čitamo binarni izlaz
-                DataInputStream dis = new DataInputStream(process.getInputStream());
-                byte[] buffer = new byte[6];
-                int bytesRead = 0;
+                File localFile = new File(destPath);
                 
-                // Čitamo dok ne dobijemo 6 bajtova
-                while (bytesRead < 6) {
-                    int read = dis.read(buffer, bytesRead, 6 - bytesRead);
-                    if (read == -1) break;
-                    bytesRead += read;
-                }
-                
-                process.waitFor();
-                
-                if (bytesRead == 6) {
-                    mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5]);
-                    readSuccess = true;
+                if (localFile.exists()) {
+                    try (FileInputStream fin = new FileInputStream(localFile)) {
+                        int bytesRead = fin.read(fileContent);
+                        if (bytesRead >= 6) {
+                            readSuccess = true;
+                        } else {
+                            errorMsg = "Read only " + bytesRead + " bytes from copied file";
+                        }
+                    } catch (IOException e) {
+                        errorMsg = "Error reading copied file: " + e.getMessage();
+                    }
                 } else {
-                    errorMsg = "Read only " + bytesRead + " bytes";
+                    errorMsg = "File not found after copy attempt";
                 }
 
-                // Ako prva metoda ne radi, probaj sa cat
+                // Ako prva metoda ne uspe, pokušaj sa drugom putanjom
                 if (!readSuccess) {
-                    Process process2 = Runtime.getRuntime().exec("su");
-                    DataOutputStream os2 = new DataOutputStream(process2.getOutputStream());
-                    
-                    os2.writeBytes("cat /data/nvram/APCFG/APRDEB/BT_ADDR 2>/dev/null\n");
-                    os2.writeBytes("exit\n");
-                    os2.flush();
+                    String destPath2 = getFilesDir().getAbsolutePath() + "/BT_ADDR2";
+                    ArrayList<String> cmds2 = new ArrayList<>();
+                    cmds2.add("cp -rp /data/nvdata/APCFG/APRDEB/BT_ADDR " + destPath2 + " 2>/dev/null");
+                    cmds2.add("chmod 0777 " + destPath2);
+                    executeRootCmds(cmds2);
 
-                    DataInputStream dis2 = new DataInputStream(process2.getInputStream());
-                    byte[] buffer2 = new byte[6];
-                    int bytesRead2 = 0;
+                    File localFile2 = new File(destPath2);
                     
-                    while (bytesRead2 < 6) {
-                        int read = dis2.read(buffer2, bytesRead2, 6 - bytesRead2);
-                        if (read == -1) break;
-                        bytesRead2 += read;
-                    }
-                    
-                    process2.waitFor();
-                    
-                    if (bytesRead2 == 6) {
-                        mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                                buffer2[0], buffer2[1], buffer2[2], buffer2[3], buffer2[4], buffer2[5]);
-                        readSuccess = true;
+                    if (localFile2.exists()) {
+                        try (FileInputStream fin = new FileInputStream(localFile2)) {
+                            int bytesRead = fin.read(fileContent);
+                            if (bytesRead >= 6) {
+                                readSuccess = true;
+                            } else {
+                                errorMsg = "Read only " + bytesRead + " bytes from second copied file";
+                            }
+                        } catch (IOException e) {
+                            errorMsg = "Error reading second copied file: " + e.getMessage();
+                        }
                     } else {
-                        errorMsg = "Cat read only " + bytesRead2 + " bytes";
+                        errorMsg = "Second file not found after copy attempt";
                     }
                 }
 
-                // Ako ništa ne radi, probaj sa drugom putanjom
+                // Ako ništa ne radi, probaj da kreiraš default fajl
                 if (!readSuccess) {
-                    Process process3 = Runtime.getRuntime().exec("su");
-                    DataOutputStream os3 = new DataOutputStream(process3.getOutputStream());
+                    errorMsg = "Failed to read from both paths. Creating default BT_ADDR file...";
                     
-                    os3.writeBytes("dd if=/data/nvdata/APCFG/APRDEB/BT_ADDR bs=1 count=6 2>/dev/null\n");
-                    os3.writeBytes("exit\n");
-                    os3.flush();
-
-                    DataInputStream dis3 = new DataInputStream(process3.getInputStream());
-                    byte[] buffer3 = new byte[6];
-                    int bytesRead3 = 0;
-                    
-                    while (bytesRead3 < 6) {
-                        int read = dis3.read(buffer3, bytesRead3, 6 - bytesRead3);
-                        if (read == -1) break;
-                        bytesRead3 += read;
+                    // Kreiraj default fajl sa MAC adresom 00:00:00:00:00:00
+                    byte[] defaultData = new byte[6];
+                    for (int i = 0; i < 6; i++) {
+                        defaultData[i] = 0x00;
                     }
                     
-                    process3.waitFor();
+                    try (FileOutputStream fos = new FileOutputStream(destPath)) {
+                        fos.write(defaultData);
+                    } catch (IOException e) {
+                        errorMsg = "Failed to create default file: " + e.getMessage();
+                    }
                     
-                    if (bytesRead3 == 6) {
-                        mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                                buffer3[0], buffer3[1], buffer3[2], buffer3[3], buffer3[4], buffer3[5]);
-                        readSuccess = true;
-                    } else {
-                        errorMsg = "Second path read only " + bytesRead3 + " bytes";
+                    // Pokušaj ponovo da pročitaš
+                    File localFile = new File(destPath);
+                    if (localFile.exists()) {
+                        try (FileInputStream fin = new FileInputStream(localFile)) {
+                            int bytesRead = fin.read(fileContent);
+                            if (bytesRead >= 6) {
+                                readSuccess = true;
+                                errorMsg = "Created default file with MAC 00:00:00:00:00:00";
+                            }
+                        } catch (IOException e) {
+                            errorMsg = "Error reading created file: " + e.getMessage();
+                        }
                     }
                 }
 
             } catch (Exception e) {
-                errorMsg = e.getMessage();
+                errorMsg = "Exception: " + e.getMessage();
                 e.printStackTrace();
             }
 
             final boolean success = readSuccess;
-            final String finalMac = mac;
+            final byte[] data = fileContent;
             final String finalError = errorMsg;
 
             mainHandler.post(() -> {
-                if (!success || finalMac == null) {
+                if (!success) {
                     tvBtResult.setText("Bluetooth Mac:\nREAD FAILED!\n\n" +
                         "Error: " + finalError + "\n\n" +
-                        "Tried reading:\n" +
+                        "Tried copying from:\n" +
                         "/data/nvram/APCFG/APRDEB/BT_ADDR\n" +
                         "/data/nvdata/APCFG/APRDEB/BT_ADDR\n\n" +
-                        "Make sure:\n" +
+                        "Please check:\n" +
                         "1. File exists\n" +
                         "2. Root permissions granted\n" +
                         "3. File permissions are correct");
@@ -393,11 +382,16 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                currentBtMac = finalMac;
-                tvBtResult.setText("Read Bluetooth Mac:\n" + finalMac);
+                // MAC adresa je na pozicijama 0-5
+                String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
+                        data[0], data[1], data[2], data[3], data[4], data[5]);
+
+                currentBtMac = mac;
+                tvBtResult.setText("Read Bluetooth Mac:\n" + mac + 
+                    "\n\nInfo: " + finalError);
                 btnWriteBt.setEnabled(true);
                 btnCopyBt.setEnabled(true);
-                Toast.makeText(MainActivity.this, "Bluetooth MAC read: " + finalMac, Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Bluetooth MAC read: " + mac, Toast.LENGTH_SHORT).show();
             });
         });
     }
@@ -423,37 +417,32 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String[] b = rawMac.split(":");
+            String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
             boolean success = false;
             String errorMsg = "";
 
             try {
-                // Prvo pročitaj ceo fajl
-                Process readProcess = Runtime.getRuntime().exec("su");
-                DataOutputStream readOs = new DataOutputStream(readProcess.getOutputStream());
-                readOs.writeBytes("cat /data/nvram/APCFG/APRDEB/BT_ADDR 2>/dev/null\n");
-                readOs.writeBytes("exit\n");
-                readOs.flush();
-
-                DataInputStream dis = new DataInputStream(readProcess.getInputStream());
+                // Prvo pročitaj postojeći fajl
+                File localFile = new File(destPath);
                 byte[] fileContent = new byte[512];
                 int totalBytes = 0;
-                
-                while (totalBytes < fileContent.length) {
-                    int read = dis.read(fileContent, totalBytes, fileContent.length - totalBytes);
-                    if (read == -1) break;
-                    totalBytes += read;
+
+                if (localFile.exists()) {
+                    try (FileInputStream fin = new FileInputStream(localFile)) {
+                        totalBytes = fin.read(fileContent);
+                    } catch (IOException e) {
+                        errorMsg = "Error reading file: " + e.getMessage();
+                    }
                 }
-                
-                readProcess.waitFor();
 
                 if (totalBytes < 6) {
-                    errorMsg = "File too small: " + totalBytes + " bytes";
-                    final String finalErrorMsg = errorMsg;
-                    mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error: " + finalErrorMsg, Toast.LENGTH_LONG).show());
-                    return;
+                    // Ako fajl ne postoji ili je mali, kreiraj novi
+                    errorMsg = "Creating new file with default size";
+                    fileContent = new byte[512];
+                    totalBytes = 512;
                 }
 
-                // Zameni prvih 6 bajtova
+                // Zameni prvih 6 bajtova sa novom MAC adresom
                 fileContent[0] = hexToByte(b[0]);
                 fileContent[1] = hexToByte(b[1]);
                 fileContent[2] = hexToByte(b[2]);
@@ -461,13 +450,17 @@ public class MainActivity extends AppCompatActivity {
                 fileContent[4] = hexToByte(b[4]);
                 fileContent[5] = hexToByte(b[5]);
 
-                // Sačuvaj u lokalni fajl
-                String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
+                // Sačuvaj lokalno
                 try (FileOutputStream file = new FileOutputStream(destPath)) {
                     file.write(fileContent, 0, totalBytes);
+                } catch (IOException e) {
+                    errorMsg = "Error saving file: " + e.getMessage();
+                    final String finalErrorMsg = errorMsg;
+                    mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error: " + finalErrorMsg, Toast.LENGTH_LONG).show());
+                    return;
                 }
 
-                // Root komande za upis
+                // Root komande za upis na obe lokacije
                 ArrayList<String> cmds = new ArrayList<>();
                 
                 // Prva lokacija
@@ -484,9 +477,14 @@ public class MainActivity extends AppCompatActivity {
                 cmds.add("sync");
 
                 success = executeRootCmds(cmds);
+                if (success) {
+                    errorMsg = "Write successful";
+                } else {
+                    errorMsg = "Failed to execute root commands";
+                }
 
             } catch (Exception e) {
-                errorMsg = e.getMessage();
+                errorMsg = "Exception: " + e.getMessage();
                 e.printStackTrace();
             }
 
