@@ -50,7 +50,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // UI Wi-Fi
+        // 1. Inicijalizacija Wi-Fi elemenata
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
         cbGenOnReset = findViewById(R.id.cbGenOnReset);
@@ -59,7 +59,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        // UI Bluetooth
+        // 2. Inicijalizacija Bluetooth elemenata
         tvBtResult = findViewById(R.id.tvBtResult);
         etBtMac = findViewById(R.id.etBtMac);
         Button btnReadBt = findViewById(R.id.btnReadBt);
@@ -67,6 +67,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
+        // Auto-format unosa
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
@@ -81,11 +82,6 @@ public class MainActivity extends AppCompatActivity {
         btnWriteBt.setOnClickListener(v -> confirmWriteBtMacAddress());
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
         btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
-
-        tvBtResult.setOnLongClickListener(v -> {
-            copyToClipboard("BT Status", tvBtResult.getText().toString());
-            return true;
-        });
     }
 
     private void setupMacFormatting(EditText editText) {
@@ -126,6 +122,8 @@ public class MainActivity extends AppCompatActivity {
         SecureRandom random = new SecureRandom();
         byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
+
+        // Unicast + Locally Administered MAC adresa
         macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
 
         return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
@@ -142,15 +140,15 @@ public class MainActivity extends AppCompatActivity {
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -f /data/nvram/APCFG/APRDEB/WIFI " + destPath);
-            cmds.add("chmod 666 " + destPath);
+            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/WIFI " + destPath);
+            cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            if (localFile.exists() && localFile.length() >= 10) {
+            if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int read = fin.read(fileContent);
                     if (read >= 10) {
@@ -231,8 +229,7 @@ public class MainActivity extends AppCompatActivity {
             fileContent[9] = hexToByte(b[5]);
 
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                int writeLength = (localFile.length() > 10) ? (int) localFile.length() : 512;
-                file.write(fileContent, 0, writeLength);
+                file.write(fileContent);
             } catch (IOException e) {
                 mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
@@ -248,17 +245,14 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
 
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
+            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
-            
-            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/WIFI");
-            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/WIFI");
-            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/WIFI");
 
-            cmds.add("rm -f /data/nvram/APCFG/APRDEB/WIFI.bak");
-            cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/WIFI*");
-            
+            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
+            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
+            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
+
             executeRootCmds(cmds);
 
             if (wifiEnabled && wifi != null) {
@@ -274,47 +268,97 @@ public class MainActivity extends AppCompatActivity {
     // ==================== BLUETOOTH LOGIKA ====================
 
     private void readBtMacAddress() {
-        tvBtResult.setText("Reading Bluetooth...");
+        tvBtResult.setText("Reading...");
 
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
-
-            // Čisto kopiranje sa potvrđene lokacije uz fallback na nvdata
-            ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath + " || cp -f /nvdata/APCFG/APRDEB/BT_ADDR " + destPath);
-            cmds.add("chmod 777 " + destPath);
-            executeRootCmds(cmds);
-
-            File localFile = new File(destPath);
-            byte[] fileContent = new byte[512];
+            String mac = null;
             boolean readSuccess = false;
 
-            if (localFile.exists() && localFile.length() >= 6) {
-                try (FileInputStream fin = new FileInputStream(localFile)) {
-                    int bytesRead = fin.read(fileContent);
-                    if (bytesRead >= 6) {
-                        readSuccess = true;
+            // Prvo pokušaj da direktno pročitaš fajlove bez kopiranja
+            String[] paths = {
+                "/data/nvram/APCFG/APRDEB/BT_ADDR",
+                "/data/nvdata/APCFG/APRDEB/BT_ADDR"
+            };
+
+            for (String path : paths) {
+                File file = new File(path);
+                if (file.exists()) {
+                    try (FileInputStream fin = new FileInputStream(file)) {
+                        byte[] buffer = new byte[512];
+                        int bytesRead = fin.read(buffer);
+                        
+                        if (bytesRead >= 12) {
+                            StringBuilder hexString = new StringBuilder();
+                            for (int i = 0; i < bytesRead; i++) {
+                                hexString.append(String.format("%02X", buffer[i]));
+                            }
+                            
+                            String content = hexString.toString();
+                            if (content.length() >= 12) {
+                                mac = content.substring(0, 2) + ":" +
+                                       content.substring(2, 4) + ":" +
+                                       content.substring(4, 6) + ":" +
+                                       content.substring(6, 8) + ":" +
+                                       content.substring(8, 10) + ":" +
+                                       content.substring(10, 12);
+                                readSuccess = true;
+                                break;
+                            }
+                        }
+                    } catch (IOException ignored) {}
+                }
+            }
+
+            // Ako nismo uspeli da pročitamo direktno, pokušaj sa kopiranjem
+            if (!readSuccess) {
+                try {
+                    ArrayList<String> cmds = new ArrayList<>();
+                    cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath + " 2>/dev/null");
+                    cmds.add("chmod 0777 " + destPath);
+                    executeRootCmds(cmds);
+
+                    File localFile = new File(destPath);
+                    if (localFile.exists()) {
+                        try (FileInputStream fin = new FileInputStream(localFile)) {
+                            byte[] buffer = new byte[512];
+                            int bytesRead = fin.read(buffer);
+                            
+                            if (bytesRead >= 12) {
+                                StringBuilder hexString = new StringBuilder();
+                                for (int i = 0; i < bytesRead; i++) {
+                                    hexString.append(String.format("%02X", buffer[i]));
+                                }
+                                
+                                String content = hexString.toString();
+                                if (content.length() >= 12) {
+                                    mac = content.substring(0, 2) + ":" +
+                                           content.substring(2, 4) + ":" +
+                                           content.substring(4, 6) + ":" +
+                                           content.substring(6, 8) + ":" +
+                                           content.substring(8, 10) + ":" +
+                                           content.substring(10, 12);
+                                    readSuccess = true;
+                                }
+                            }
+                        } catch (IOException ignored) {}
                     }
-                } catch (IOException ignored) {}
+                } catch (Exception ignored) {}
             }
 
             final boolean success = readSuccess;
-            final byte[] data = fileContent;
+            final String finalMac = mac;
 
             mainHandler.post(() -> {
-                if (!success) {
-                    tvBtResult.setText("Bluetooth Mac:\nError reading BT_ADDR file");
+                if (!success || finalMac == null) {
+                    tvBtResult.setText("Bluetooth Mac:\nError reading file\n\nMake sure:\n1. Device is rooted\n2. File exists\n3. Correct permissions");
                     btnWriteBt.setEnabled(false);
                     btnCopyBt.setEnabled(false);
                     return;
                 }
 
-                // Bluetooth MAC adresa počinje direktno na bajtu 0 (indeksi 0-5)
-                String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                        data[0], data[1], data[2], data[3], data[4], data[5]);
-
-                currentBtMac = mac;
-                tvBtResult.setText("Read Bluetooth Mac:\n" + mac);
+                currentBtMac = finalMac;
+                tvBtResult.setText("Read Bluetooth Mac:\n" + finalMac);
                 btnWriteBt.setEnabled(true);
                 btnCopyBt.setEnabled(true);
             });
@@ -343,47 +387,69 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String[] b = rawMac.split(":");
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
-            File localFile = new File(destPath);
             
-            // Postojeći bajtovi se čitaju ili inicijalizuje niz od 6 bajtova
-            byte[] fileContent = new byte[6];
-            if (localFile.exists()) {
-                try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fin.read(fileContent);
-                } catch (IOException ignored) {}
+            String hexMac = b[0] + b[1] + b[2] + b[3] + b[4] + b[5];
+            
+            byte[] fileContent = new byte[512];
+            int bytesRead = 0;
+
+            // Pokušaj da pročitaš originalni fajl
+            String[] paths = {
+                "/data/nvram/APCFG/APRDEB/BT_ADDR",
+                "/data/nvdata/APCFG/APRDEB/BT_ADDR"
+            };
+
+            for (String path : paths) {
+                File file = new File(path);
+                if (file.exists()) {
+                    try (FileInputStream fin = new FileInputStream(file)) {
+                        bytesRead = fin.read(fileContent);
+                        break;
+                    } catch (IOException ignored) {}
+                }
             }
 
-            // Upis bajtova od 0 do 5
-            fileContent[0] = hexToByte(b[0]);
-            fileContent[1] = hexToByte(b[1]);
-            fileContent[2] = hexToByte(b[2]);
-            fileContent[3] = hexToByte(b[3]);
-            fileContent[4] = hexToByte(b[4]);
-            fileContent[5] = hexToByte(b[5]);
+            // Ako nismo uspeli da pročitamo, kreiraj novi fajl
+            if (bytesRead <= 0) {
+                String defaultContent = "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+                fileContent = hexStringToByteArray(hexMac + defaultContent.substring(12));
+                bytesRead = fileContent.length;
+            } else {
+                StringBuilder hexString = new StringBuilder();
+                for (int i = 0; i < bytesRead; i++) {
+                    hexString.append(String.format("%02X", fileContent[i]));
+                }
+                
+                String content = hexString.toString();
+                String newContent = hexMac + content.substring(12);
+                fileContent = hexStringToByteArray(newContent);
+            }
 
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                file.write(fileContent, 0, 6);
+                file.write(fileContent);
             } catch (IOException e) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing.", Toast.LENGTH_SHORT).show());
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing: " + e.getMessage(), Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            // Upis i na /data/nvram i na /nvdata/ radi trajne sinhronizacije
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
+            
+            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_ADDR");
+            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_ADDR");
+            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_ADDR");
 
-            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
-            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
-            cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
+            boolean success = executeRootCmds(cmds);
 
-            cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
-            cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
-
-            executeRootCmds(cmds);
-
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully!", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> {
+                if (success) {
+                    Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully.\nReboot device for changes to take effect.", Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(MainActivity.this, "Error: Root permissions required!", Toast.LENGTH_LONG).show();
+                }
+            });
         });
     }
 
@@ -391,6 +457,16 @@ public class MainActivity extends AppCompatActivity {
 
     private byte hexToByte(String s) {
         return (byte) ((Character.digit(s.charAt(0), 16) << 4) + Character.digit(s.charAt(1), 16));
+    }
+
+    private byte[] hexStringToByteArray(String hex) {
+        int len = hex.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                                 + Character.digit(hex.charAt(i+1), 16));
+        }
+        return data;
     }
 
     private boolean executeRootCmds(ArrayList<String> cmds) {
