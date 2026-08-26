@@ -138,14 +138,13 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
-            File localFile = new File(destPath);
-            if (localFile.exists()) localFile.delete();
 
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("cp -f /data/nvram/APCFG/APRDEB/WIFI " + destPath);
             cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
+            File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
@@ -268,22 +267,21 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
-            File localFile = new File(destPath);
-            if (localFile.exists()) localFile.delete();
 
-            // Kopiranje identičnom metodom kao Wi-Fi fajl
+            // Koristimo dd za sigurno kopiranje sirovih bajtova iz NVRAM-a
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
+            cmds.add("dd if=/data/nvram/APCFG/APRDEB/BT_ADDR of=" + destPath + " bs=512 count=1 2>/dev/null || cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
+            File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
             if (localFile.exists() && localFile.length() > 0) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
-                    int read = fin.read(fileContent);
-                    if (read >= 6) {
+                    int bytesRead = fin.read(fileContent);
+                    if (bytesRead >= 6) {
                         readSuccess = true;
                     }
                 } catch (IOException ignored) {}
@@ -300,7 +298,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Čitanje prvih 6 bajtova (iz tvog primera: 84 9F B5 1D 76 52)
+                // Bluetooth adresa je na samom početku fajla (indeksi 0 do 5)
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -337,14 +335,14 @@ public class MainActivity extends AppCompatActivity {
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
-            // 1. Pročitamo celokupan postojeci fajl od 512 bajtova u memoriju da se ne ošteti NVRAM zaglavlje
+            // 1. Pročitamo postojeći lokalni fajl da sačuvamo strukturu
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     fin.read(fileContent);
                 } catch (IOException ignored) {}
             }
 
-            // 2. Izmenimo samo prvih 6 bajtova (indeksi 0-5)
+            // 2. Zamenimo samo prvih 6 bajtova na indeksima 0 do 5
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -352,7 +350,7 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 3. Zapišemo nazad 512 bajtova u lokalni fajl
+            // 3. Zapišemo izmenjeni sadržaj lokalno
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
             } catch (IOException e) {
@@ -360,14 +358,14 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 4. Vratimo izmenjeni fajl nazad u system NVRAM i vratimo permissions
+            // 4. Vraćamo izmenjeni fajl u NVRAM
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("dd if=" + destPath + " of=/data/nvram/APCFG/APRDEB/BT_ADDR bs=512 count=1 2>/dev/null || cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed! Reboot device to apply.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed! Restart Bluetooth or reboot device.", Toast.LENGTH_LONG).show());
         });
     }
 
