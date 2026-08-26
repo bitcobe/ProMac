@@ -48,7 +48,7 @@ public class MainActivity extends AppCompatActivity {
 
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
-        cbGenOnReset = findViewById(R.id.cbGenOnReset); // Dodaj CheckBox u layout ako ga imaš
+        cbGenOnReset = findViewById(R.id.cbGenOnReset);
 
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
         btnWriteWifi = findViewById(R.id.btnWriteWifi);
@@ -102,7 +102,6 @@ public class MainActivity extends AppCompatActivity {
         byte[] b = new byte[5];
         random.nextBytes(b);
 
-        // ChameleMAC logika generisanja nasumične adrese (AA:XX:XX:XX:XX:XX)[cite: 1]
         return String.format("AA:%02X:%02X:%02X:%02X:%02X", b[0], b[1], b[2], b[3], b[4]);
     }
 
@@ -111,11 +110,10 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
-            
-            // ChameleMAC inicijalno izdvajanje fajla iz NVRAM-a[cite: 1]
+
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/WIFI " + destPath);[cite: 1]
-            cmds.add("chmod 0777 " + destPath);[cite: 1]
+            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/WIFI " + destPath);
+            cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
             File localFile = new File(destPath);
@@ -124,7 +122,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fin.read(fileContent);[cite: 1]
+                    fin.read(fileContent);
                     readSuccess = true;
                 } catch (IOException ignored) {}
             }
@@ -140,13 +138,12 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Provera -95 (0xA1) zastavice za auto-generisanje iz ChameleMAC-a[cite: 1]
-                if (data[4] == -95 && cbGenOnReset != null) {[cite: 1]
+                if (data[4] == -95 && cbGenOnReset != null) {
                     cbGenOnReset.setChecked(true);
                 }
 
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                        data[4], data[5], data[6], data[7], data[8], data[9]);[cite: 1]
+                        data[4], data[5], data[6], data[7], data[8], data[9]);
 
                 currentWifiMac = mac;
                 tvWifiResult.setText("Read WiFi Mac:\n" + mac);
@@ -161,15 +158,15 @@ public class MainActivity extends AppCompatActivity {
         String rawMac = etWifiMac.getText().toString().trim();
 
         if (!autoGen && !isValidMac(rawMac)) {
-            Toast.makeText(this, "Your MAC is invalid.", Toast.LENGTH_LONG).show();[cite: 1]
+            Toast.makeText(this, "Your MAC is invalid.", Toast.LENGTH_LONG).show();
             return;
         }
 
         new AlertDialog.Builder(this)
-            .setTitle("Confirmation")[cite: 1]
-            .setMessage("Do you confirm changing the MAC ?")[cite: 1]
-            .setPositiveButton("Change", (dialog, which) -> startWriteProcess(rawMac, autoGen))[cite: 1]
-            .setNegativeButton("Cancel", null)[cite: 1]
+            .setTitle("Confirmation")
+            .setMessage("Do you confirm changing the MAC ?")
+            .setPositiveButton("Change", (dialog, which) -> startWriteProcess(rawMac, autoGen))
+            .setNegativeButton("Cancel", null)
             .show();
     }
 
@@ -179,70 +176,63 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String[] b;
             if (autoGen) {
-                // Fiktivni niz koji ChameleMAC koristi za auto-gen režim[cite: 1]
-                b = new String[]{"A1", "02", "02", "02", "02", "03"};[cite: 1]
+                b = new String[]{"A1", "02", "02", "02", "02", "03"};
             } else {
-                b = rawMac.split(":");[cite: 1]
+                b = rawMac.split(":");
             }
 
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
-            // 1. Učitavanje postojećeg lokalnog fajla[cite: 1]
             try (FileInputStream fin = new FileInputStream(localFile)) {
-                fin.read(fileContent);[cite: 1]
+                fin.read(fileContent);
             } catch (IOException e) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());[cite: 1]
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            // 2. Modifikacija bajtova na tačnim pozicijama [4..9][cite: 1]
-            fileContent[4] = hexToByte(b[0]);[cite: 1]
-            fileContent[5] = hexToByte(b[1]);[cite: 1]
-            fileContent[6] = hexToByte(b[2]);[cite: 1]
-            fileContent[7] = hexToByte(b[3]);[cite: 1]
-            fileContent[8] = hexToByte(b[4]);[cite: 1]
-            fileContent[9] = hexToByte(b[5]);[cite: 1]
+            fileContent[4] = hexToByte(b[0]);
+            fileContent[5] = hexToByte(b[1]);
+            fileContent[6] = hexToByte(b[2]);
+            fileContent[7] = hexToByte(b[3]);
+            fileContent[8] = hexToByte(b[4]);
+            fileContent[9] = hexToByte(b[5]);
 
-            // 3. Upis nazad u privatni fajl aplikacije[cite: 1]
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                file.write(fileContent);[cite: 1]
+                file.write(fileContent);
             } catch (IOException e) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());[cite: 1]
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            // 4. Privremeno gašenje Wi-Fi interfejsa (ChameleMAC metoda)[cite: 1]
             boolean wifiEnabled = false;
             WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             try {
                 if (wifi != null && wifi.isWifiEnabled()) {
                     wifiEnabled = true;
-                    wifi.setWifiEnabled(false);[cite: 1]
+                    wifi.setWifiEnabled(false);
                 }
             } catch (Exception ignored) {}
 
-            // 5. TAČAN ChameleMAC niz root komandi[cite: 1]
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");[cite: 1]
-            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");[cite: 1]
-            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");[cite: 1]
+            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
+            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
+            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
             executeRootCmds(cmds);
 
-            // 6. Ponovno paljenje Wi-Fi-ja[cite: 1]
             if (wifiEnabled && wifi != null) {
                 try {
-                    wifi.setWifiEnabled(true);[cite: 1]
+                    wifi.setWifiEnabled(true);
                 } catch (Exception ignored) {}
             }
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "MAC address has been changed successfully.", Toast.LENGTH_LONG).show());[cite: 1]
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "MAC address has been changed successfully.", Toast.LENGTH_LONG).show());
         });
     }
 
     private byte hexToByte(String s) {
-        return (byte) ((Character.digit(s.charAt(0), 16) << 4) + Character.digit(s.charAt(1), 16));[cite: 1]
+        return (byte) ((Character.digit(s.charAt(0), 16) << 4) + Character.digit(s.charAt(1), 16));
     }
 
     private boolean executeRootCmds(ArrayList<String> cmds) {
@@ -269,7 +259,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isValidMac(String mac) {
-        return mac != null && mac.matches("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");[cite: 1]
+        return mac != null && mac.matches("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");
     }
 
     private void copyToClipboard(String label, String text) {
