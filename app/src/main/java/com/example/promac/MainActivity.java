@@ -50,7 +50,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // UI Wi-Fi
+        // Inicijalizacija Wi-Fi elemenata
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
         cbGenOnReset = findViewById(R.id.cbGenOnReset);
@@ -59,7 +59,7 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        // UI Bluetooth
+        // Inicijalizacija Bluetooth elemenata
         tvBtResult = findViewById(R.id.tvBtResult);
         etBtMac = findViewById(R.id.etBtMac);
         Button btnReadBt = findViewById(R.id.btnReadBt);
@@ -70,11 +70,13 @@ public class MainActivity extends AppCompatActivity {
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
+        // Wi-Fi Akcije
         btnReadWifi.setOnClickListener(v -> readMacAddress());
         btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress());
         btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
         btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
 
+        // Bluetooth Akcije
         btnReadBt.setOnClickListener(v -> readBtMacAddress());
         btnWriteBt.setOnClickListener(v -> confirmWriteBtMacAddress());
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
@@ -272,17 +274,17 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
-            // dd osigurava čitanje zakrenutog ili malog binarnog fajla
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("dd if=/data/nvram/APCFG/APRDEB/BT_ADDR of=" + destPath + " bs=512 count=1 2>/dev/null || cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
+            // dd osigurava sirovo binarno kopiranje bez obzira na sistemske blokade
+            cmds.add("dd if=/data/nvram/APCFG/APRDEB/BT_ADDR of=" + destPath + " bs=6 count=1 2>/dev/null || cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 666 " + destPath);
             executeRootCmds(cmds);
 
             File localFile = new File(destPath);
-            byte[] fileContent = new byte[512];
+            byte[] fileContent = new byte[6];
             boolean readSuccess = false;
 
-            // BT_ADDR zahteva provereu na minimum 6 bajtova (indeksi 0-5)
+            // Provera je smanjena na tačno >= 6 bajtova
             if (localFile.exists() && localFile.length() >= 6) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
@@ -303,7 +305,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // Bluetooth adresa je na bajtovima 0 do 5
+                // Bluetooth bajtovi idu direktno od indeks 0 do 5
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -337,16 +339,9 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String[] b = rawMac.split(":");
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
-            File localFile = new File(destPath);
-            byte[] fileContent = new byte[512];
+            byte[] fileContent = new byte[6];
 
-            if (localFile.exists()) {
-                try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fin.read(fileContent);
-                } catch (IOException ignored) {}
-            }
-
-            // Upis novih bajtova na indeks 0-5
+            // Direct byte mapping za BT (0 do 5)
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -355,26 +350,23 @@ public class MainActivity extends AppCompatActivity {
             fileContent[5] = hexToByte(b[5]);
 
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                int writeLength = (localFile.length() >= 6) ? (int) localFile.length() : 6;
-                file.write(fileContent, 0, writeLength);
+                file.write(fileContent, 0, 6);
             } catch (IOException e) {
                 mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
             }
 
             ArrayList<String> cmds = new ArrayList<>();
-            
-            // 1. Primarni NVRAM upis preko dd / cp
-            cmds.add("dd if=" + destPath + " of=/data/nvram/APCFG/APRDEB/BT_ADDR bs=512 count=1 2>/dev/null || cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("dd if=" + destPath + " of=/data/nvram/APCFG/APRDEB/BT_ADDR bs=6 count=1 2>/dev/null || cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
 
-            // 2. Upis u /nvdata/ rezervnu kopiju (sprečava vraćanje na staro pri restartu)
+            // Sinhronizacija sa /nvdata da spreci vraćanje starog MAC-a posle reboot-a
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
 
-            // 3. Brisanje keš fajlova
+            // Brisanje MTK NVRAM keša
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
 
