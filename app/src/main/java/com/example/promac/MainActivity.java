@@ -283,10 +283,10 @@ public class MainActivity extends AppCompatActivity {
                 cmds.add("chmod 0777 " + destPath);
                 executeRootCmds(cmds);
 
-                File localFile = new File(destPath);
+                File localFile1 = new File(destPath);
                 
-                if (localFile.exists()) {
-                    try (FileInputStream fin = new FileInputStream(localFile)) {
+                if (localFile1.exists()) {
+                    try (FileInputStream fin = new FileInputStream(localFile1)) {
                         int bytesRead = fin.read(fileContent);
                         if (bytesRead >= 6) {
                             readSuccess = true;
@@ -343,9 +343,9 @@ public class MainActivity extends AppCompatActivity {
                     }
                     
                     // Pokušaj ponovo da pročitaš
-                    File localFile = new File(destPath);
-                    if (localFile.exists()) {
-                        try (FileInputStream fin = new FileInputStream(localFile)) {
+                    File localFile3 = new File(destPath);
+                    if (localFile3.exists()) {
+                        try (FileInputStream fin = new FileInputStream(localFile3)) {
                             int bytesRead = fin.read(fileContent);
                             if (bytesRead >= 6) {
                                 readSuccess = true;
