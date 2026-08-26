@@ -1,177 +1,274 @@
-package com.example.macspoofer;
+package com.example.promac;
 
-import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.net.wifi.WifiManager;
-import android.os.Build;
 import android.os.Bundle;
-import android.view.View;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
 
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.security.SecureRandom;
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
-    private EditText etMacAddress;
-    private Button btnApplyMac, btnGenerateRandom;
-    
-    // Putanja do MediaTek Wi-Fi NVRAM fajla
-    private static final String MTK_NVRAM_WIFI_PATH = "/data/nvram/APCFG/APRDEB/WIFI";
+    private TextView tvWifiResult, tvBtResult;
+    private EditText etWifiMac, etBtMac;
+    private Button btnWriteWifi, btnWriteBt;
+    private Button btnCopyWifi, btnCopyBt;
+
+    private String currentWifiMac = "";
+    private String currentBtMac = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        etMacAddress = findViewById(R.id.etMacAddress);
-        btnApplyMac = findViewById(R.id.btnApplyMac);
-        btnGenerateRandom = findViewById(R.id.btnGenerateRandom);
+        tvWifiResult = findViewById(R.id.tvWifiResult);
+        tvBtResult = findViewById(R.id.tvBtResult);
+        etWifiMac = findViewById(R.id.etWifiMac);
+        etBtMac = findViewById(R.id.etBtMac);
 
-        // Provera da li je uređaj MediaTek
-        if (!isMediaTekDevice()) {
-            Toast.makeText(this, "Upozorenje: Čipset nije MediaTek! NVRAM izmena možda neće raditi.", Toast.LENGTH_LONG).show();
-        }
+        Button btnReadWifi = findViewById(R.id.btnReadWifi);
+        btnWriteWifi = findViewById(R.id.btnWriteWifi);
+        Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
+        btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        // Učitavanje trenutne adrese iz NVRAM-a pri pokretanju
-        String currentNvramMac = readMacFromNvram();
-        if (currentNvramMac != null) {
-            etMacAddress.setText(currentNvramMac);
-        }
+        Button btnReadBt = findViewById(R.id.btnReadBt);
+        btnWriteBt = findViewById(R.id.btnWriteBt);
+        Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
+        btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Generisanje nasumične MAC adrese
-        btnGenerateRandom.setOnClickListener(new View.OnClickListener() {
+        // Auto formatting sa ':' za polja za unos
+        setupMacFormatting(etWifiMac);
+        setupMacFormatting(etBtMac);
+
+        btnReadWifi.setOnClickListener(v -> readMacAddress(true));
+        btnReadBt.setOnClickListener(v -> readMacAddress(false));
+
+        btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress(true));
+        btnWriteBt.setOnClickListener(v -> confirmWriteMacAddress(false));
+
+        btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
+        btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
+
+        btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
+        btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
+    }
+
+    private void setupMacFormatting(EditText editText) {
+        editText.addTextChangedListener(new TextWatcher() {
+            private boolean isFormatting = false;
+
             @Override
-            public void onClick(View v) {
-                etMacAddress.setText(generateRandomMac());
-            }
-        });
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
 
-        // Primenjivanje nove trajne MAC adrese
-        btnApplyMac.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(View v) {
-                String newMac = etMacAddress.getText().toString().trim().toUpperCase();
-                
-                if (!validateMac(newMac)) {
-                    Toast.makeText(MainActivity.this, "Neispravan format MAC adrese!", Toast.LENGTH_SHORT).show();
-                    return;
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (isFormatting) return;
+                isFormatting = true;
+
+                String clean = s.toString().replaceAll("[^A-Fa-f0-9]", "");
+                if (clean.length() > 12) {
+                    clean = clean.substring(0, 12);
                 }
 
-                if (applyPermanentMacMediaTek(newMac)) {
-                    Toast.makeText(MainActivity.this, "MAC adresa uspešno i trajno izmenjena!", Toast.LENGTH_LONG).show();
-                } else {
-                    Toast.makeText(MainActivity.this, "Greška pri upisivanju u NVRAM (proverite Root pristup).", Toast.LENGTH_LONG).show();
+                StringBuilder formatted = new StringBuilder();
+                for (int i = 0; i < clean.length(); i++) {
+                    if (i > 0 && i % 2 == 0) {
+                        formatted.append(":");
+                    }
+                    formatted.append(clean.charAt(i));
                 }
+
+                s.replace(0, s.length(), formatted.toString().toUpperCase());
+                isFormatting = false;
             }
         });
     }
 
-    /**
-     * Proverava da li uređaj pokreće MediaTek procesor
-     */
-    private boolean isMediaTekDevice() {
-        String hardware = Build.HARDWARE.toLowerCase();
-        return hardware.startsWith("mt") || new File(MTK_NVRAM_WIFI_PATH).exists();
-    }
-
-    /**
-     * Generiše nasumičnu validnu MAC adresu (sufiks sa 'AA' radi izbegavanja konflikta)
-     */
     private String generateRandomMac() {
         SecureRandom random = new SecureRandom();
-        byte[] macBytes = new byte[5];
+        byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
-        
-        StringBuilder sb = new StringBuilder("AA");
-        for (byte b : macBytes) {
-            sb.append(String.format(":%02X", b));
+
+        // Postavljanje lokalno administrirane unicast adrese (LAA bit)
+        macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 6; i++) {
+            sb.append(String.format("%02X", macBytes[i]));
+            if (i < 5) sb.append(":");
         }
         return sb.toString();
     }
 
-    /**
-     * Validacija MAC adrese (Format XX:XX:XX:XX:XX:XX)
-     */
-    private boolean validateMac(String mac) {
-        if (mac == null || mac.length() != 17) return false;
-        return mac.matches("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$");
-    }
+    private void readMacAddress(boolean isWifi) {
+        String fileName = isWifi ? "WIFI" : "BT_Addr";
+        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
 
-    /**
-     * Čita trenutnu MAC adresu iz bajtova 4-9 NVRAM fajla
-     */
-    private String readMacFromNvram() {
-        if (!new File(MTK_NVRAM_WIFI_PATH).exists()) return null;
-        
-        try {
-            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(MTK_NVRAM_WIFI_PATH, "r");
-            byte[] bytes = new byte[10];
-            raf.readFully(bytes);
-            raf.close();
+        String[] possiblePaths = {
+            "/nvdata/APCFG/APRDEB/" + fileName,
+            "/data/nvram/APCFG/APRDEB/" + fileName,
+            "/vendor/nvdata/APCFG/APRDEB/" + fileName
+        };
 
-            return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                    bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9]);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+        byte[] bytes = null;
+        for (String path : possiblePaths) {
+            bytes = readBytesFromPath(path);
+            if (bytes != null && bytes.length > 0) break;
+        }
+
+        if (bytes == null) {
+            targetView.setText((isWifi ? "WiFi Mac:\n" : "Bluetooth Mac:\n") + "Error reading file");
+            if (isWifi) {
+                btnWriteWifi.setEnabled(false);
+                btnCopyWifi.setEnabled(false);
+            } else {
+                btnWriteBt.setEnabled(false);
+                btnCopyBt.setEnabled(false);
+            }
+            return;
+        }
+
+        String mac = parseMacFromBytes(bytes, isWifi);
+        if (isWifi) {
+            currentWifiMac = mac;
+            targetView.setText("Read WiFi Mac:\n" + mac);
+            btnWriteWifi.setEnabled(true);
+            btnCopyWifi.setEnabled(true);
+        } else {
+            currentBtMac = mac;
+            targetView.setText("Read Bluetooth Mac:\n" + mac);
+            btnWriteBt.setEnabled(true);
+            btnCopyBt.setEnabled(true);
         }
     }
 
-    /**
-     * Glavni mehanizam za trajno menjanje MAC adrese u NVRAM-u
-     */
-    private boolean applyPermanentMacMediaTek(String newMac) {
-        String[] hexParts = newMac.split(":");
-        if (hexParts.length != 6) return false;
+    private void confirmWriteMacAddress(boolean isWifi) {
+        EditText targetEditText = isWifi ? etWifiMac : etBtMac;
+        String rawMac = targetEditText.getText().toString().trim();
 
-        byte[] macBytes = new byte[6];
-        for (int i = 0; i < 6; i++) {
-            macBytes[i] = (byte) Integer.parseInt(hexParts[i], 16);
+        if (!isValidMac(rawMac)) {
+            Toast.makeText(this, "Invalid MAC format!", Toast.LENGTH_LONG).show();
+            return;
         }
 
-        WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        String type = isWifi ? "Wi-Fi" : "Bluetooth";
+
+        new AlertDialog.Builder(this)
+            .setTitle("Confirm Write")
+            .setMessage("Are you sure you want to write " + rawMac + " as the new " + type + " MAC address?")
+            .setPositiveButton("Yes", (dialog, which) -> writeMacAddress(isWifi, rawMac))
+            .setNegativeButton("No", null)
+            .show();
+    }
+
+    private void writeMacAddress(boolean isWifi, String rawMac) {
+        TextView targetView = isWifi ? tvWifiResult : tvBtResult;
+        byte[] macBytes = parseMacToBytes(rawMac);
+
+        if (macBytes == null) {
+            Toast.makeText(this, "Error parsing MAC address.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String fileName = isWifi ? "WIFI" : "BT_Addr";
+        String primaryPath = "/nvdata/APCFG/APRDEB/" + fileName;
+        String secondaryPath = "/data/nvram/APCFG/APRDEB/" + fileName;
+
+        // Privremeno gašenje Wi-Fi radi oslobađanja fajla iz drajvera
+        WifiManager wifiManager = null;
         boolean wasWifiEnabled = false;
-
-        // 1. Gašenje Wi-Fi-ja radi oslobađanja drajvera
-        if (wifiManager != null && wifiManager.isWifiEnabled()) {
-            wasWifiEnabled = true;
-            wifiManager.setWifiEnabled(false);
-            try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
+        if (isWifi) {
+            wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager != null && wifiManager.isWifiEnabled()) {
+                wasWifiEnabled = true;
+                wifiManager.setWifiEnabled(false);
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            }
         }
 
-        // 2. Priprema Root komandi za direct-patching bajtova 4-9
+        boolean successPrimary = writeMacToMtkFile(primaryPath, macBytes, isWifi);
+        boolean successSecondary = writeMacToMtkFile(secondaryPath, macBytes, isWifi);
+
+        // Ponovno uključivanje Wi-Fi-ja
+        if (isWifi && wasWifiEnabled && wifiManager != null) {
+            wifiManager.setWifiEnabled(true);
+        }
+
+        if (successPrimary || successSecondary) {
+            Toast.makeText(this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
+            if (isWifi) {
+                currentWifiMac = rawMac;
+                targetView.setText("Write WiFi Mac:\n" + rawMac);
+                btnCopyWifi.setEnabled(true);
+            } else {
+                currentBtMac = rawMac;
+                targetView.setText("Write Bluetooth Mac:\n" + rawMac);
+                btnCopyBt.setEnabled(true);
+            }
+        } else {
+            Toast.makeText(this, "Failed to write MAC. Ensure root access.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void copyToClipboard(String label, String text) {
+        if (text == null || text.isEmpty()) {
+            Toast.makeText(this, "No MAC address to copy!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = ClipData.newPlainText(label, text);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(this, label + " copied to clipboard!", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Trajni upis u NVRAM: Direct-patching sa dd (bs=1 seek=offset conv=notrunc),
+     * korekcija dozvola (chmod 660, chown root.nvram) i SELinux osvežavanje (restorecon).
+     */
+    private boolean writeMacToMtkFile(String filePath, byte[] macBytes, boolean isWifi) {
+        if (!new File(filePath).exists() && !new File("/data/nvram/APCFG/APRDEB").exists()) {
+            return false;
+        }
+
+        int offset = isWifi ? 4 : 0; // Bajtovi 4-9 za WIFI, 0-5 za BT_Addr
         StringBuilder cmdBuilder = new StringBuilder();
 
         for (int i = 0; i < 6; i++) {
             int byteVal = macBytes[i] & 0xFF;
-            int offset = 4 + i; // Od bajta 4 do bajta 9
-            cmdBuilder.append(String.format("printf '\\x%02X' | dd of=%s bs=1 seek=%d conv=notrunc\n", 
-                    byteVal, MTK_NVRAM_WIFI_PATH, offset));
+            int targetOffset = offset + i;
+            cmdBuilder.append(String.format("printf '\\x%02X' | dd of=%s bs=1 seek=%d conv=notrunc\n",
+                    byteVal, filePath, targetOffset));
         }
 
-        // 3. Postavljanje dozvola, vlasništva i SELinux konteksta
-        cmdBuilder.append("chmod 660 ").append(MTK_NVRAM_WIFI_PATH).append("\n");
-        cmdBuilder.append("chown root.nvram ").append(MTK_NVRAM_WIFI_PATH).append("\n");
-        cmdBuilder.append("restorecon ").append(MTK_NVRAM_WIFI_PATH).append("\n");
+        // Popravka permizija za trajnost nakon restarta
+        cmdBuilder.append("chmod 660 ").append(filePath).append("\n");
+        cmdBuilder.append("chown root.nvram ").append(filePath).append("\n");
+        cmdBuilder.append("restorecon ").append(filePath).append("\n");
 
-        // 4. Izvršavanje kroz Root Shell
-        boolean result = runRootScript(cmdBuilder.toString());
-
-        // 5. Ponovno uključivanje Wi-Fi mreže sa novom adresom
-        if (wasWifiEnabled && wifiManager != null) {
-            wifiManager.setWifiEnabled(true);
-        }
-
-        return result;
+        return runRootScript(cmdBuilder.toString());
     }
 
-    /**
-     * Pomoćna metoda za izvršavanje komandi sa Root privilegijama
-     */
     private boolean runRootScript(String script) {
         Process process = null;
         DataOutputStream os = null;
@@ -192,5 +289,80 @@ public class MainActivity extends Activity {
                 if (process != null) process.destroy();
             } catch (Exception ignored) {}
         }
+    }
+
+    private boolean isValidMac(String mac) {
+        return mac.matches("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");
+    }
+
+    private byte[] parseMacToBytes(String mac) {
+        String[] parts = mac.split("[:-]");
+        if (parts.length != 6) return null;
+        byte[] bytes = new byte[6];
+        for (int i = 0; i < 6; i++) {
+            bytes[i] = (byte) Integer.parseInt(parts[i], 16);
+        }
+        return bytes;
+    }
+
+    private byte[] readBytesFromPath(String filePath) {
+        File file = new File(filePath);
+        if (file.exists() && file.canRead()) {
+            try (FileInputStream fis = new FileInputStream(file)) {
+                byte[] data = new byte[(int) file.length()];
+                int read = fis.read(data);
+                if (read > 0) return data;
+            } catch (IOException ignored) {}
+        }
+        return readBytesWithRoot(filePath);
+    }
+
+    private byte[] readBytesWithRoot(String filePath) {
+        try {
+            Process process = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(process.getOutputStream());
+            InputStream is = process.getInputStream();
+
+            os.writeBytes("cat " + filePath + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
+
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] temp = new byte[256];
+            int bytesRead;
+
+            while ((bytesRead = is.read(temp)) != -1) {
+                buffer.write(temp, 0, bytesRead);
+            }
+
+            process.waitFor();
+            byte[] data = buffer.toByteArray();
+            return data.length > 0 ? data : null;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private String parseMacFromBytes(byte[] data, boolean isWifi) {
+        if (data == null) return "Empty File";
+        int offset = 0;
+        int length = 6;
+
+        if (isWifi) {
+            if (data.length >= 10) offset = 4;
+            else if (data.length >= 6) offset = 0;
+            else return "Invalid WIFI file size";
+        } else {
+            if (data.length < 6) return "Invalid BT_Addr file size";
+            offset = 0;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < length; i++) {
+            sb.append(String.format("%02X", data[offset + i]));
+            if (i < length - 1) sb.append(":");
+        }
+        return sb.toString();
     }
 }
