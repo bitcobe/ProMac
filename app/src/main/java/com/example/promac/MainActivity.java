@@ -41,7 +41,6 @@ public class MainActivity extends AppCompatActivity {
     private EditText etBtMac;
     private Button btnWriteBt, btnCopyBt;
     private String currentBtMac = "";
-    private String activeBtPath = "/data/nvram/APCFG/APRDEB/BT_ADDR"; // Podrazumevana putanja
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -83,7 +82,6 @@ public class MainActivity extends AppCompatActivity {
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
         btnCopyBt.setOnClickListener(v -> copyToClipboard("Bluetooth MAC", currentBtMac));
 
-        // Dugi pritisak kopira tekst iz rezultata
         tvBtResult.setOnLongClickListener(v -> {
             copyToClipboard("BT Status", tvBtResult.getText().toString());
             return true;
@@ -281,43 +279,17 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
 
-            // Moguće lokacije Bluetooth NVRAM fajla na MediaTek čipsetovima
-            String[] possiblePaths = new String[]{
-                "/data/nvram/APCFG/APRDEB/BT_ADDR",
-                "/nvdata/APCFG/APRDEB/BT_ADDR",
-                "/data/nvram/APCFG/APRDEB/BT",
-                "/nvdata/APCFG/APRDEB/BT",
-                "/data/nvram/md/NVRAM/NVD_DATA/BT_ADDR"
-            };
-
-            boolean foundAndCopied = false;
-            String matchedPath = "";
-
-            for (String srcPath : possiblePaths) {
-                // Brisanje prethodnog pokušaja ako je postojao
-                File oldLocal = new File(destPath);
-                if (oldLocal.exists()) {
-                    oldLocal.delete();
-                }
-
-                ArrayList<String> cmds = new ArrayList<>();
-                cmds.add("dd if=" + srcPath + " of=" + destPath + " bs=6 count=1 2>/dev/null || cp -f " + srcPath + " " + destPath);
-                cmds.add("chmod 666 " + destPath);
-                executeRootCmds(cmds);
-
-                File localFile = new File(destPath);
-                if (localFile.exists() && localFile.length() >= 6) {
-                    foundAndCopied = true;
-                    matchedPath = srcPath;
-                    break;
-                }
-            }
+            // Čisto kopiranje sa potvrđene lokacije uz fallback na nvdata
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("cp -f /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath + " || cp -f /nvdata/APCFG/APRDEB/BT_ADDR " + destPath);
+            cmds.add("chmod 777 " + destPath);
+            executeRootCmds(cmds);
 
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             boolean readSuccess = false;
 
-            if (foundAndCopied && localFile.exists()) {
+            if (localFile.exists() && localFile.length() >= 6) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
                     if (bytesRead >= 6) {
@@ -328,19 +300,16 @@ public class MainActivity extends AppCompatActivity {
 
             final boolean success = readSuccess;
             final byte[] data = fileContent;
-            final String validPath = matchedPath;
 
             mainHandler.post(() -> {
                 if (!success) {
-                    tvBtResult.setText("Bluetooth Mac:\nFile not found in NVRAM");
+                    tvBtResult.setText("Bluetooth Mac:\nError reading BT_ADDR file");
                     btnWriteBt.setEnabled(false);
                     btnCopyBt.setEnabled(false);
                     return;
                 }
 
-                activeBtPath = validPath;
-
-                // Bluetooth MAC se čita od bajta 0 do 5
+                // Bluetooth MAC adresa počinje direktno na bajtu 0 (indeksi 0-5)
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -374,9 +343,17 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String[] b = rawMac.split(":");
             String destPath = getFilesDir().getAbsolutePath() + "/BT_ADDR";
+            File localFile = new File(destPath);
+            
+            // Postojeći bajtovi se čitaju ili inicijalizuje niz od 6 bajtova
             byte[] fileContent = new byte[6];
+            if (localFile.exists()) {
+                try (FileInputStream fin = new FileInputStream(localFile)) {
+                    fin.read(fileContent);
+                } catch (IOException ignored) {}
+            }
 
-            // Pisanje bajtova direktno od indeksa 0
+            // Upis bajtova od 0 do 5
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -391,19 +368,16 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
+            // Upis i na /data/nvram i na /nvdata/ radi trajne sinhronizacije
             ArrayList<String> cmds = new ArrayList<>();
-            
-            // Upis na detektovanu aktivnu putanju
-            cmds.add("dd if=" + destPath + " of=" + activeBtPath + " bs=6 count=1 2>/dev/null || cp -f " + destPath + " " + activeBtPath);
-            cmds.add("chmod 660 " + activeBtPath);
-            cmds.add("chown root.nvram " + activeBtPath);
+            cmds.add("cp -f " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
 
-            // Sinhronizacija sa rezervnom /nvdata/ kopijom ako postoji
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && cp -f " + destPath + " /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chmod 660 /nvdata/APCFG/APRDEB/BT_ADDR");
             cmds.add("[ -d /nvdata/APCFG/APRDEB ] && chown root.nvram /nvdata/APCFG/APRDEB/BT_ADDR");
 
-            // Brisanje NVRAM keširanja
             cmds.add("rm -f /data/nvram/APCFG/APRDEB/BT_ADDR.bak");
             cmds.add("rm -rf /data/nvram/md/NVRAM/NVD_DATA/BT_ADDR*");
 
