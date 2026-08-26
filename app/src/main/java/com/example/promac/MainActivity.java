@@ -5,6 +5,8 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.Button;
@@ -21,6 +23,8 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.SecureRandom;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -31,6 +35,10 @@ public class MainActivity extends AppCompatActivity {
 
     private String currentWifiMac = "";
     private String currentBtMac = "";
+
+    // Executor za rad u pozadinskoj niti da se spreči pucanje aplikacije (UI freeze)
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,7 +60,6 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Auto formatting sa ':' za polja za unos
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
@@ -108,7 +115,7 @@ public class MainActivity extends AppCompatActivity {
         byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
 
-        // Postavljanje lokalno administrirane unicast adrese (LAA bit)
+        // Postavljanje LAA bita (locally administered)
         macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
 
         StringBuilder sb = new StringBuilder();
@@ -120,45 +127,51 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void readMacAddress(boolean isWifi) {
-        String fileName = isWifi ? "WIFI" : "BT_Addr";
         TextView targetView = isWifi ? tvWifiResult : tvBtResult;
+        targetView.setText("Reading...");
 
-        String[] possiblePaths = {
-            "/nvdata/APCFG/APRDEB/" + fileName,
-            "/data/nvram/APCFG/APRDEB/" + fileName,
-            "/vendor/nvdata/APCFG/APRDEB/" + fileName
-        };
+        executor.execute(() -> {
+            String fileName = isWifi ? "WIFI" : "BT_Addr";
+            String[] possiblePaths = {
+                "/nvdata/APCFG/APRDEB/" + fileName,
+                "/data/nvram/APCFG/APRDEB/" + fileName,
+                "/vendor/nvdata/APCFG/APRDEB/" + fileName
+            };
 
-        byte[] bytes = null;
-        for (String path : possiblePaths) {
-            bytes = readBytesFromPath(path);
-            if (bytes != null && bytes.length > 0) break;
-        }
-
-        if (bytes == null) {
-            targetView.setText((isWifi ? "WiFi Mac:\n" : "Bluetooth Mac:\n") + "Error reading file");
-            if (isWifi) {
-                btnWriteWifi.setEnabled(false);
-                btnCopyWifi.setEnabled(false);
-            } else {
-                btnWriteBt.setEnabled(false);
-                btnCopyBt.setEnabled(false);
+            byte[] bytes = null;
+            for (String path : possiblePaths) {
+                bytes = readBytesFromPath(path);
+                if (bytes != null && bytes.length > 0) break;
             }
-            return;
-        }
 
-        String mac = parseMacFromBytes(bytes, isWifi);
-        if (isWifi) {
-            currentWifiMac = mac;
-            targetView.setText("Read WiFi Mac:\n" + mac);
-            btnWriteWifi.setEnabled(true);
-            btnCopyWifi.setEnabled(true);
-        } else {
-            currentBtMac = mac;
-            targetView.setText("Read Bluetooth Mac:\n" + mac);
-            btnWriteBt.setEnabled(true);
-            btnCopyBt.setEnabled(true);
-        }
+            final byte[] finalBytes = bytes;
+            mainHandler.post(() -> {
+                if (finalBytes == null) {
+                    targetView.setText((isWifi ? "WiFi Mac:\n" : "Bluetooth Mac:\n") + "Error reading file");
+                    if (isWifi) {
+                        btnWriteWifi.setEnabled(false);
+                        btnCopyWifi.setEnabled(false);
+                    } else {
+                        btnWriteBt.setEnabled(false);
+                        btnCopyBt.setEnabled(false);
+                    }
+                    return;
+                }
+
+                String mac = parseMacFromBytes(finalBytes, isWifi);
+                if (isWifi) {
+                    currentWifiMac = mac;
+                    targetView.setText("Read WiFi Mac:\n" + mac);
+                    btnWriteWifi.setEnabled(true);
+                    btnCopyWifi.setEnabled(true);
+                } else {
+                    currentBtMac = mac;
+                    targetView.setText("Read Bluetooth Mac:\n" + mac);
+                    btnWriteBt.setEnabled(true);
+                    btnCopyBt.setEnabled(true);
+                }
+            });
+        });
     }
 
     private void confirmWriteMacAddress(boolean isWifi) {
@@ -175,83 +188,73 @@ public class MainActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
             .setTitle("Confirm Write")
             .setMessage("Are you sure you want to write " + rawMac + " as the new " + type + " MAC address?")
-            .setPositiveButton("Yes", (dialog, which) -> writeMacAddress(isWifi, rawMac))
+            .setPositiveButton("Yes", (dialog, which) -> startWriteProcess(isWifi, rawMac))
             .setNegativeButton("No", null)
             .show();
     }
 
-    private void writeMacAddress(boolean isWifi, String rawMac) {
+    private void startWriteProcess(boolean isWifi, String rawMac) {
         TextView targetView = isWifi ? tvWifiResult : tvBtResult;
-        byte[] macBytes = parseMacToBytes(rawMac);
+        Toast.makeText(this, "Writing MAC address...", Toast.LENGTH_SHORT).show();
 
-        if (macBytes == null) {
-            Toast.makeText(this, "Error parsing MAC address.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        String fileName = isWifi ? "WIFI" : "BT_Addr";
-        String primaryPath = "/nvdata/APCFG/APRDEB/" + fileName;
-        String secondaryPath = "/data/nvram/APCFG/APRDEB/" + fileName;
-
-        // Privremeno gašenje Wi-Fi radi oslobađanja fajla iz drajvera
-        WifiManager wifiManager = null;
-        boolean wasWifiEnabled = false;
-        if (isWifi) {
-            wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            if (wifiManager != null && wifiManager.isWifiEnabled()) {
-                wasWifiEnabled = true;
-                wifiManager.setWifiEnabled(false);
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+        executor.execute(() -> {
+            byte[] macBytes = parseMacToBytes(rawMac);
+            if (macBytes == null) {
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error parsing MAC address.", Toast.LENGTH_SHORT).show());
+                return;
             }
-        }
 
-        boolean successPrimary = writeMacToMtkFile(primaryPath, macBytes, isWifi);
-        boolean successSecondary = writeMacToMtkFile(secondaryPath, macBytes, isWifi);
+            String fileName = isWifi ? "WIFI" : "BT_Addr";
+            String primaryPath = "/nvdata/APCFG/APRDEB/" + fileName;
+            String secondaryPath = "/data/nvram/APCFG/APRDEB/" + fileName;
 
-        // Ponovno uključivanje Wi-Fi-ja
-        if (isWifi && wasWifiEnabled && wifiManager != null) {
-            wifiManager.setWifiEnabled(true);
-        }
-
-        if (successPrimary || successSecondary) {
-            Toast.makeText(this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
+            // Bezbedno gašenje Wi-Fi radija bez rušenja aplikacije
             if (isWifi) {
-                currentWifiMac = rawMac;
-                targetView.setText("Write WiFi Mac:\n" + rawMac);
-                btnCopyWifi.setEnabled(true);
-            } else {
-                currentBtMac = rawMac;
-                targetView.setText("Write Bluetooth Mac:\n" + rawMac);
-                btnCopyBt.setEnabled(true);
+                try {
+                    WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wifiManager != null && wifiManager.isWifiEnabled()) {
+                        wifiManager.setWifiEnabled(false);
+                        Thread.sleep(1000);
+                    }
+                } catch (Exception ignored) {}
             }
-        } else {
-            Toast.makeText(this, "Failed to write MAC. Ensure root access.", Toast.LENGTH_LONG).show();
-        }
+
+            boolean successPrimary = writeMacToMtkFile(primaryPath, macBytes, isWifi);
+            boolean successSecondary = writeMacToMtkFile(secondaryPath, macBytes, isWifi);
+
+            final boolean isSuccess = successPrimary || successSecondary;
+
+            // Vraćanje Wi-Fi stanja
+            if (isWifi) {
+                try {
+                    WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wifiManager != null) {
+                        wifiManager.setWifiEnabled(true);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            mainHandler.post(() -> {
+                if (isSuccess) {
+                    Toast.makeText(MainActivity.this, (isWifi ? "Wi-Fi" : "Bluetooth") + " MAC written successfully!", Toast.LENGTH_LONG).show();
+                    if (isWifi) {
+                        currentWifiMac = rawMac;
+                        targetView.setText("Write WiFi Mac:\n" + rawMac);
+                        btnCopyWifi.setEnabled(true);
+                    } else {
+                        currentBtMac = rawMac;
+                        targetView.setText("Write Bluetooth Mac:\n" + rawMac);
+                        btnCopyBt.setEnabled(true);
+                    }
+                } else {
+                    Toast.makeText(MainActivity.this, "Failed to write MAC. Root access denied or NVRAM path missing.", Toast.LENGTH_LONG).show();
+                }
+            });
+        });
     }
 
-    private void copyToClipboard(String label, String text) {
-        if (text == null || text.isEmpty()) {
-            Toast.makeText(this, "No MAC address to copy!", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        ClipData clip = ClipData.newPlainText(label, text);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(clip);
-            Toast.makeText(this, label + " copied to clipboard!", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * Trajni upis u NVRAM: Direct-patching sa dd (bs=1 seek=offset conv=notrunc),
-     * korekcija dozvola (chmod 660, chown root.nvram) i SELinux osvežavanje (restorecon).
-     */
     private boolean writeMacToMtkFile(String filePath, byte[] macBytes, boolean isWifi) {
-        if (!new File(filePath).exists() && !new File("/data/nvram/APCFG/APRDEB").exists()) {
-            return false;
-        }
-
-        int offset = isWifi ? 4 : 0; // Bajtovi 4-9 za WIFI, 0-5 za BT_Addr
+        int offset = isWifi ? 4 : 0;
         StringBuilder cmdBuilder = new StringBuilder();
 
         for (int i = 0; i < 6; i++) {
@@ -261,7 +264,6 @@ public class MainActivity extends AppCompatActivity {
                     byteVal, filePath, targetOffset));
         }
 
-        // Popravka permizija za trajnost nakon restarta
         cmdBuilder.append("chmod 660 ").append(filePath).append("\n");
         cmdBuilder.append("chown root.nvram ").append(filePath).append("\n");
         cmdBuilder.append("restorecon ").append(filePath).append("\n");
@@ -364,5 +366,24 @@ public class MainActivity extends AppCompatActivity {
             if (i < length - 1) sb.append(":");
         }
         return sb.toString();
+    }
+
+    private void copyToClipboard(String label, String text) {
+        if (text == null || text.isEmpty()) {
+            Toast.makeText(this, "No MAC address to copy!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = ClipData.newPlainText(label, text);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(this, label + " copied to clipboard!", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        executor.shutdown();
     }
 }
