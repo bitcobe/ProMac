@@ -276,9 +276,9 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_Addr";
 
-            // Prvo pokušaj da kopiraš sa /data/ (PRIMARNI IZVOR)
+            // Čitamo SAMO iz /data/nvram/ (GLAVNI IZVOR)
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/BT_Addr " + destPath + " 2>/dev/null || cp -rp /data/nvram/APCFG/APRDEB/BT_Addr " + destPath);
+            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
             cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
@@ -289,7 +289,7 @@ public class MainActivity extends AppCompatActivity {
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int bytesRead = fin.read(fileContent);
-                    if (bytesRead >= 6) {
+                    if (bytesRead >= 8) { // 6 bajtova MAC + 2 bajta checksum
                         readSuccess = true;
                     }
                 } catch (IOException ignored) {}
@@ -342,24 +342,33 @@ public class MainActivity extends AppCompatActivity {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_Addr";
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
+            int fileLength = 0;
 
             // 1. Isključivanje Bluetooth servisa
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("service call bluetooth_manager 8");
             executeRootCmds(cmds);
 
-            // Mala pauza da se Bluetooth ugasi
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
 
-            // 2. Čitanje postojećeg fajla
+            // 2. Čitanje postojećeg fajla iz /data/nvram/
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fin.read(fileContent);
+                    fileLength = fin.read(fileContent);
                 } catch (IOException ignored) {}
+            }
+
+            // Ako je fajl prazan, kreiraj default (512 bajtova)
+            if (fileLength < 8) {
+                fileLength = 512;
+                // Postavi default vrednosti (sve nule)
+                for (int i = 0; i < fileLength; i++) {
+                    fileContent[i] = 0x00;
+                }
             }
 
             // 3. Menjanje MAC adrese (pozicije 0-5)
@@ -370,48 +379,34 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 4. Pisanje fajla
+            // 4. Izračunavanje CRC-16 checksum-a za ceo fajl (bez poslednja 2 bajta)
+            byte[] dataForChecksum = new byte[fileLength - 2];
+            System.arraycopy(fileContent, 0, dataForChecksum, 0, fileLength - 2);
+            byte[] checksum = calculateChecksum(dataForChecksum);
+
+            // 5. Dodavanje checksum-a na kraj (poslednja 2 bajta)
+            fileContent[fileLength - 2] = checksum[0];
+            fileContent[fileLength - 1] = checksum[1];
+
+            // 6. Pisanje fajla
             try (FileOutputStream file = new FileOutputStream(destPath)) {
-                file.write(fileContent);
+                file.write(fileContent, 0, fileLength);
             } catch (IOException e) {
                 mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing.", Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            // 5. Root komande za kopiranje na SVE lokacije
+            // 7. Kopiranje na /data/nvram/ (GLAVNI IZVOR)
             cmds.clear();
-            
-            // /data/ - PRIMARNI IZVOR
-            cmds.add("cp -rp " + destPath + " /data/BT_Addr");
-            cmds.add("chmod 660 /data/BT_Addr");
-            cmds.add("chown root.nvram /data/BT_Addr");
-            
-            // /data/nvram/ - REZERVNI IZVOR
-            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_Addr");
-            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_Addr");
-            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_Addr");
+            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
+            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
 
-            // /data/nvdata/ - AKO POSTOJI
-            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
-            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
-            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
+            // 8. Kopiranje na /data/nvdata/ (REZERVNI IZVOR)
+            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
+            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
+            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
 
-            // ====== IZMENA bt_config.conf i bt_config.bak ======
-            
-            String newMac = rawMac;
-            
-            // 6. Izmena MAC adrese u bt_config.conf
-            cmds.add("sed -i 's/^Address = .*/Address = " + newMac + "/g' /data/misc/bluedroid/bt_config.conf");
-            
-            // 7. Izmena MAC adrese u bt_config.bak
-            cmds.add("sed -i 's/^Address = .*/Address = " + newMac + "/g' /data/misc/bluedroid/bt_config.bak");
-            
-            // 8. Postavljanje dozvola za oba fajla
-            cmds.add("chown bluetooth:bluetooth /data/misc/bluedroid/bt_config.conf");
-            cmds.add("chmod 0660 /data/misc/bluedroid/bt_config.conf");
-            cmds.add("chown bluetooth:bluetooth /data/misc/bluedroid/bt_config.bak");
-            cmds.add("chmod 0660 /data/misc/bluedroid/bt_config.bak");
-            
             // 9. Sinhronizacija
             cmds.add("sync");
 
@@ -420,10 +415,28 @@ public class MainActivity extends AppCompatActivity {
             mainHandler.post(() -> {
                 tvBtResult.setText("Write Bluetooth Mac:\n" + rawMac);
                 Toast.makeText(MainActivity.this, 
-                    "Bluetooth MAC changed to: " + rawMac + "\nPlease turn Bluetooth ON manually and reboot.", 
+                    "Bluetooth MAC changed to: " + rawMac + "\nReboot for changes to take effect.", 
                     Toast.LENGTH_LONG).show();
             });
         });
+    }
+
+    // ==================== CRC-16 CHECKSUM METODA ====================
+
+    private byte[] calculateChecksum(byte[] data) {
+        int crc = 0x0000;
+        for (byte b : data) {
+            crc ^= (b & 0xFF) << 8;
+            for (int i = 0; i < 8; i++) {
+                if ((crc & 0x8000) != 0) {
+                    crc = (crc << 1) ^ 0x1021;
+                } else {
+                    crc <<= 1;
+                }
+                crc &= 0xFFFF;
+            }
+        }
+        return new byte[]{(byte) ((crc >> 8) & 0xFF), (byte) (crc & 0xFF)};
     }
 
     // ==================== POMOĆNE METODE ====================
