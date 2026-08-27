@@ -274,29 +274,41 @@ public class MainActivity extends AppCompatActivity {
         tvBtResult.setText("Reading...");
 
         executor.execute(() -> {
-            String destPath = getFilesDir().getAbsolutePath() + "/BT_Addr";
+            String fileName = "BT_Addr";
 
-            // Čitamo SAMO iz /data/nvram/ (GLAVNI IZVOR)
-            ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_ADDR " + destPath);
-            cmds.add("chmod 0777 " + destPath);
-            executeRootCmds(cmds);
+            // Tvoj originalni način čitanja - proba više putanja
+            String[] possiblePaths = {
+                "/data/BT_Addr",
+                "/data/nvram/APCFG/APRDEB/" + fileName,
+                "/nvdata/APCFG/APRDEB/" + fileName,
+                "/data/nvdata/APCFG/APRDEB/" + fileName
+            };
 
-            File localFile = new File(destPath);
-            byte[] fileContent = new byte[512];
-            boolean readSuccess = false;
+            byte[] bytes = null;
+            for (String path : possiblePaths) {
+                String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
+                ArrayList<String> cmds = new ArrayList<>();
+                cmds.add("cp -rp " + path + " " + destPath + " 2>/dev/null");
+                cmds.add("chmod 0777 " + destPath);
+                executeRootCmds(cmds);
 
-            if (localFile.exists()) {
-                try (FileInputStream fin = new FileInputStream(localFile)) {
-                    int bytesRead = fin.read(fileContent);
-                    if (bytesRead >= 8) { // 6 bajtova MAC + 2 bajta checksum
-                        readSuccess = true;
-                    }
-                } catch (IOException ignored) {}
+                File localFile = new File(destPath);
+                byte[] fileContent = new byte[512];
+
+                if (localFile.exists()) {
+                    try (FileInputStream fin = new FileInputStream(localFile)) {
+                        int bytesRead = fin.read(fileContent);
+                        if (bytesRead >= 6) {
+                            bytes = new byte[6];
+                            System.arraycopy(fileContent, 0, bytes, 0, 6);
+                            break;
+                        }
+                    } catch (IOException ignored) {}
+                }
             }
 
-            final boolean success = readSuccess;
-            final byte[] data = fileContent;
+            final boolean success = (bytes != null);
+            final byte[] data = bytes;
 
             mainHandler.post(() -> {
                 if (!success) {
@@ -306,7 +318,6 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // MAC adresa je na pozicijama 0-5 (prvih 6 bajtova)
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -339,12 +350,13 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String[] b = rawMac.split(":");
-            String destPath = getFilesDir().getAbsolutePath() + "/BT_Addr";
+            String fileName = "BT_Addr";
+            String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
             int fileLength = 0;
 
-            // 1. Isključivanje Bluetooth servisa
+            // 1. Isključi Bluetooth
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("service call bluetooth_manager 8");
             executeRootCmds(cmds);
@@ -355,23 +367,32 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
 
-            // 2. Čitanje postojećeg fajla iz /data/nvram/
-            if (localFile.exists()) {
-                try (FileInputStream fin = new FileInputStream(localFile)) {
-                    fileLength = fin.read(fileContent);
-                } catch (IOException ignored) {}
+            // 2. Pročitaj postojeći fajl (sa bilo koje putanje)
+            String[] possiblePaths = {
+                "/data/BT_Addr",
+                "/data/nvram/APCFG/APRDEB/" + fileName,
+                "/nvdata/APCFG/APRDEB/" + fileName,
+                "/data/nvdata/APCFG/APRDEB/" + fileName
+            };
+
+            for (String path : possiblePaths) {
+                File file = new File(path);
+                if (file.exists()) {
+                    try (FileInputStream fin = new FileInputStream(file)) {
+                        fileLength = fin.read(fileContent);
+                        if (fileLength >= 8) break;
+                    } catch (IOException ignored) {}
+                }
             }
 
-            // Ako je fajl prazan, kreiraj default (512 bajtova)
             if (fileLength < 8) {
                 fileLength = 512;
-                // Postavi default vrednosti (sve nule)
                 for (int i = 0; i < fileLength; i++) {
                     fileContent[i] = 0x00;
                 }
             }
 
-            // 3. Menjanje MAC adrese (pozicije 0-5)
+            // 3. Menjaj MAC (pozicije 0-5)
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -379,16 +400,14 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 4. Izračunavanje CRC-16 checksum-a za ceo fajl (bez poslednja 2 bajta)
+            // 4. Izračunaj CRC-16 checksum
             byte[] dataForChecksum = new byte[fileLength - 2];
             System.arraycopy(fileContent, 0, dataForChecksum, 0, fileLength - 2);
             byte[] checksum = calculateChecksum(dataForChecksum);
-
-            // 5. Dodavanje checksum-a na kraj (poslednja 2 bajta)
             fileContent[fileLength - 2] = checksum[0];
             fileContent[fileLength - 1] = checksum[1];
 
-            // 6. Pisanje fajla
+            // 5. Piši fajl
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent, 0, fileLength);
             } catch (IOException e) {
@@ -396,20 +415,26 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 7. Kopiranje na /data/nvram/ (GLAVNI IZVOR)
+            // 6. Kopiraj na sve lokacije (isti pattern kao Wi-Fi)
             cmds.clear();
-            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_ADDR");
-            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_ADDR");
-            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_ADDR");
-
-            // 8. Kopiranje na /data/nvdata/ (REZERVNI IZVOR)
-            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
-            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
-            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_ADDR 2>/dev/null || true");
-
-            // 9. Sinhronizacija
+            
+            // /data/nvram/ - GLAVNI IZVOR
+            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/" + fileName);
+            cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/" + fileName);
+            cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/" + fileName);
+            
+            // /data/ - DODATNI IZVOR (sistem ga koristi)
+            cmds.add("cp -rp " + destPath + " /data/" + fileName);
+            cmds.add("chmod 660 /data/" + fileName);
+            cmds.add("chown root.nvram /data/" + fileName);
+            
+            // /data/nvdata/ - REZERVNI IZVOR
+            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+            
+            // Sinhronizacija
             cmds.add("sync");
-
             executeRootCmds(cmds);
 
             mainHandler.post(() -> {
