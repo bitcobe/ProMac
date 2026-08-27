@@ -339,6 +339,12 @@ public class MainActivity extends AppCompatActivity {
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
+            // Isključivanje Bluetooth servisa PRE pisanja
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("svc bluetooth disable");
+            executeRootCmds(cmds);
+
+            // Čitanje postojećeg fajla
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     fin.read(fileContent);
@@ -353,6 +359,7 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
+            // Pisanje fajla
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
             } catch (IOException e) {
@@ -360,7 +367,8 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            ArrayList<String> cmds = new ArrayList<>();
+            // Root komande za kopiranje fajla
+            cmds.clear();
             
             // Kopiranje na /data/nvram/
             cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_Addr");
@@ -372,9 +380,15 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
             cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
 
+            // Sinhronizacija
+            cmds.add("sync");
+
+            // Ponovno uključivanje Bluetooth servisa POSLE pisanja
+            cmds.add("svc bluetooth enable");
+
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully. Restart Bluetooth or reboot device.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully.", Toast.LENGTH_LONG).show());
         });
     }
 
