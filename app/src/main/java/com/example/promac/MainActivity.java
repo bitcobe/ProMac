@@ -50,7 +50,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 1. Inicijalizacija Wi-Fi elemenata
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
         cbGenOnReset = findViewById(R.id.cbGenOnReset);
@@ -59,7 +58,6 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
         btnCopyWifi = findViewById(R.id.btnCopyWifi);
 
-        // 2. Inicijalizacija Bluetooth elemenata
         tvBtResult = findViewById(R.id.tvBtResult);
         etBtMac = findViewById(R.id.etBtMac);
         Button btnReadBt = findViewById(R.id.btnReadBt);
@@ -67,17 +65,14 @@ public class MainActivity extends AppCompatActivity {
         Button btnGenerateBt = findViewById(R.id.btnGenerateBt);
         btnCopyBt = findViewById(R.id.btnCopyBt);
 
-        // Auto-format unosa
         setupMacFormatting(etWifiMac);
         setupMacFormatting(etBtMac);
 
-        // Wi-Fi Akcije
         btnReadWifi.setOnClickListener(v -> readMacAddress());
         btnWriteWifi.setOnClickListener(v -> confirmWriteMacAddress());
         btnGenerateWifi.setOnClickListener(v -> etWifiMac.setText(generateRandomMac()));
         btnCopyWifi.setOnClickListener(v -> copyToClipboard("Wi-Fi MAC", currentWifiMac));
 
-        // Bluetooth Akcije
         btnReadBt.setOnClickListener(v -> readBtMacAddress());
         btnWriteBt.setOnClickListener(v -> confirmWriteBtMacAddress());
         btnGenerateBt.setOnClickListener(v -> etBtMac.setText(generateRandomMac()));
@@ -122,23 +117,17 @@ public class MainActivity extends AppCompatActivity {
         SecureRandom random = new SecureRandom();
         byte[] macBytes = new byte[6];
         random.nextBytes(macBytes);
-
-        // Unicast + Locally Administered MAC adresa
         macBytes[0] = (byte) ((macBytes[0] & 0xFE) | 0x02);
-
         return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                 macBytes[0], macBytes[1], macBytes[2],
                 macBytes[3], macBytes[4], macBytes[5]);
     }
 
-    // ==================== WI-FI LOGIKA ====================
-
+    // ==================== WI-FI ====================
     private void readMacAddress() {
         tvWifiResult.setText("Reading...");
-
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
-
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("cp -rp /data/nvram/APCFG/APRDEB/WIFI " + destPath);
             cmds.add("chmod 0777 " + destPath);
@@ -151,9 +140,7 @@ public class MainActivity extends AppCompatActivity {
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     int read = fin.read(fileContent);
-                    if (read >= 10) {
-                        readSuccess = true;
-                    }
+                    if (read >= 10) readSuccess = true;
                 } catch (IOException ignored) {}
             }
 
@@ -174,7 +161,6 @@ public class MainActivity extends AppCompatActivity {
 
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[4], data[5], data[6], data[7], data[8], data[9]);
-
                 currentWifiMac = mac;
                 tvWifiResult.setText("Read WiFi Mac:\n" + mac);
                 btnWriteWifi.setEnabled(true);
@@ -248,11 +234,9 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/WIFI");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/WIFI");
-
             cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
             cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
             cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/WIFI 2>/dev/null || true");
-
             executeRootCmds(cmds);
 
             if (wifiEnabled && wifi != null) {
@@ -268,19 +252,18 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ==================== BLUETOOTH LOGIKA ====================
-
+    // ==================== BLUETOOTH ====================
+    
     private void readBtMacAddress() {
         tvBtResult.setText("Reading...");
 
         executor.execute(() -> {
-            String fileName = "BT_ADDR";  // sva velika slova
+            String fileName = "BT_Addr";
 
-            // Tvoj originalni način čitanja - proba više putanja
             String[] possiblePaths = {
+                "/data/BT_Addr",
                 "/data/nvram/APCFG/APRDEB/" + fileName,
-                "/data/nvdata/APCFG/APRDEB/" + fileName,
-                "/data/BT_Addr"
+                "/data/nvdata/APCFG/APRDEB/" + fileName
             };
 
             byte[] bytes = null;
@@ -349,10 +332,9 @@ public class MainActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             String[] b = rawMac.split(":");
-            String fileName = "BT_ADDR";  // sva velika slova
+            String fileName = "BT_Addr";
             String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
             
-            // 1. Isključi Bluetooth
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("service call bluetooth_manager 8");
             executeRootCmds(cmds);
@@ -382,7 +364,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            // Ako nismo uspeli da pročitamo, kreiraj default (66 bajtova)
             if (fileLength != 66) {
                 fileLength = 66;
                 for (int i = 0; i < fileLength; i++) {
@@ -398,16 +379,15 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 4. Izračunaj CRC-16 checksum za PRVIH 64 BAJTOVA (bez checksum-a)
+            // 4. Izračunaj CRC-16 checksum za PRVIH 64 BAJTOVA
             byte[] dataForChecksum = new byte[64];
             System.arraycopy(fileContent, 0, dataForChecksum, 0, 64);
             byte[] checksum = calculateChecksum(dataForChecksum);
 
-            // 5. Dodaj checksum na pozicije 64-65 (poslednja 2 bajta)
             fileContent[64] = checksum[0];
             fileContent[65] = checksum[1];
 
-            // 6. Piši fajl (66 bajtova)
+            // 5. Piši fajl (66 bajtova)
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent, 0, 66);
             } catch (IOException e) {
@@ -415,21 +395,17 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 7. Kopiraj na sve lokacije
             cmds.clear();
             
-            // /data/nvram/ (66 bajtova sa checksum)
+            // /data/nvram/
             cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/" + fileName);
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/" + fileName);
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/" + fileName);
             
-            // /data/nvdata/ (66 bajtova sa checksum)
+            // /data/nvdata/
             cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
             cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
             cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
-            
-            // /data/BT_Addr (64 bajtova BEZ checksum - sistem će ga sam kreirati)
-            // Ne kopiramo ga jer sistem sam kreira od prvih 64 bajtova!
             
             cmds.add("sync");
             executeRootCmds(cmds);
@@ -443,7 +419,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ==================== CRC-16 CHECKSUM METODA ====================
+    // ==================== CRC-16 CHECKSUM ====================
 
     private byte[] calculateChecksum(byte[] data) {
         int crc = 0x0000;
