@@ -261,7 +261,10 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             }
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Wi-Fi MAC address changed successfully.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> {
+                tvWifiResult.setText("Write WiFi Mac:\n" + rawMac);
+                Toast.makeText(MainActivity.this, "Wi-Fi MAC address changed successfully.", Toast.LENGTH_LONG).show();
+            });
         });
     }
 
@@ -351,14 +354,14 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
 
-            // 2. Čitanje postojećeg fajla
+            // 2. Čitanje postojećeg NVRAM fajla
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     fin.read(fileContent);
                 } catch (IOException ignored) {}
             }
 
-            // 3. Menjanje MAC adrese (pozicije 0-5)
+            // 3. Menjanje MAC adrese u NVRAM fajlu (pozicije 0-5)
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -366,7 +369,7 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 4. Pisanje fajla
+            // 4. Pisanje NVRAM fajla
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
             } catch (IOException e) {
@@ -374,7 +377,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 5. Root komande za kopiranje fajla
+            // 5. Root komande za kopiranje NVRAM fajlova
             cmds.clear();
             
             // Kopiranje na /data/nvram/
@@ -387,14 +390,33 @@ public class MainActivity extends AppCompatActivity {
             cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
             cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
 
-            // Sinhronizacija
+            // ====== IZMENA bt_config.conf i bt_config.bak ======
+            
+            String newMac = rawMac;
+            
+            // 6. Izmena MAC adrese u bt_config.conf
+            cmds.add("sed -i 's/^Address = .*/Address = " + newMac + "/g' /data/misc/bluedroid/bt_config.conf");
+            
+            // 7. Izmena MAC adrese u bt_config.bak
+            cmds.add("sed -i 's/^Address = .*/Address = " + newMac + "/g' /data/misc/bluedroid/bt_config.bak");
+            
+            // 8. Postavljanje dozvola za oba fajla
+            cmds.add("chown bluetooth:bluetooth /data/misc/bluedroid/bt_config.conf");
+            cmds.add("chmod 0660 /data/misc/bluedroid/bt_config.conf");
+            cmds.add("chown bluetooth:bluetooth /data/misc/bluedroid/bt_config.bak");
+            cmds.add("chmod 0660 /data/misc/bluedroid/bt_config.bak");
+            
+            // 9. Sinhronizacija
             cmds.add("sync");
 
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, 
-                "Bluetooth MAC changed successfully!\nPlease turn Bluetooth ON manually.", 
-                Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> {
+                tvBtResult.setText("Write Bluetooth Mac:\n" + rawMac);
+                Toast.makeText(MainActivity.this, 
+                    "Bluetooth MAC changed to: " + rawMac + "\nPlease turn Bluetooth ON manually and reboot.", 
+                    Toast.LENGTH_LONG).show();
+            });
         });
     }
 
