@@ -339,19 +339,26 @@ public class MainActivity extends AppCompatActivity {
             File localFile = new File(destPath);
             byte[] fileContent = new byte[512];
 
-            // Isključivanje Bluetooth servisa PRE pisanja
+            // 1. Isključivanje Bluetooth servisa
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("svc bluetooth disable");
+            cmds.add("service call bluetooth_manager 8");
             executeRootCmds(cmds);
 
-            // Čitanje postojećeg fajla
+            // Mala pauza da se Bluetooth ugasi
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            // 2. Čitanje postojećeg fajla
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     fin.read(fileContent);
                 } catch (IOException ignored) {}
             }
 
-            // MAC adresa je na pozicijama 0-5
+            // 3. Menjanje MAC adrese (pozicije 0-5)
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -359,7 +366,7 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // Pisanje fajla
+            // 4. Pisanje fajla
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
             } catch (IOException e) {
@@ -367,7 +374,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // Root komande za kopiranje fajla
+            // 5. Root komande za kopiranje fajla
             cmds.clear();
             
             // Kopiranje na /data/nvram/
@@ -383,12 +390,11 @@ public class MainActivity extends AppCompatActivity {
             // Sinhronizacija
             cmds.add("sync");
 
-            // Ponovno uključivanje Bluetooth servisa POSLE pisanja
-            cmds.add("svc bluetooth enable");
-
             executeRootCmds(cmds);
 
-            mainHandler.post(() -> Toast.makeText(MainActivity.this, "Bluetooth MAC address changed successfully.", Toast.LENGTH_LONG).show());
+            mainHandler.post(() -> Toast.makeText(MainActivity.this, 
+                "Bluetooth MAC changed successfully!\nPlease turn Bluetooth ON manually.", 
+                Toast.LENGTH_LONG).show());
         });
     }
 
