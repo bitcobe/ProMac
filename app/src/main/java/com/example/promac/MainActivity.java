@@ -276,8 +276,9 @@ public class MainActivity extends AppCompatActivity {
         executor.execute(() -> {
             String destPath = getFilesDir().getAbsolutePath() + "/BT_Addr";
 
+            // Prvo pokušaj da kopiraš sa /data/ (PRIMARNI IZVOR)
             ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/BT_Addr " + destPath + " 2>/dev/null || cp -rp /data/nvdata/APCFG/APRDEB/BT_Addr " + destPath);
+            cmds.add("cp -rp /data/BT_Addr " + destPath + " 2>/dev/null || cp -rp /data/nvram/APCFG/APRDEB/BT_Addr " + destPath);
             cmds.add("chmod 0777 " + destPath);
             executeRootCmds(cmds);
 
@@ -354,14 +355,14 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
 
-            // 2. Čitanje postojećeg NVRAM fajla
+            // 2. Čitanje postojećeg fajla
             if (localFile.exists()) {
                 try (FileInputStream fin = new FileInputStream(localFile)) {
                     fin.read(fileContent);
                 } catch (IOException ignored) {}
             }
 
-            // 3. Menjanje MAC adrese u NVRAM fajlu (pozicije 0-5)
+            // 3. Menjanje MAC adrese (pozicije 0-5)
             fileContent[0] = hexToByte(b[0]);
             fileContent[1] = hexToByte(b[1]);
             fileContent[2] = hexToByte(b[2]);
@@ -369,7 +370,7 @@ public class MainActivity extends AppCompatActivity {
             fileContent[4] = hexToByte(b[4]);
             fileContent[5] = hexToByte(b[5]);
 
-            // 4. Pisanje NVRAM fajla
+            // 4. Pisanje fajla
             try (FileOutputStream file = new FileOutputStream(destPath)) {
                 file.write(fileContent);
             } catch (IOException e) {
@@ -377,15 +378,20 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 5. Root komande za kopiranje NVRAM fajlova
+            // 5. Root komande za kopiranje na SVE lokacije
             cmds.clear();
             
-            // Kopiranje na /data/nvram/
+            // /data/ - PRIMARNI IZVOR
+            cmds.add("cp -rp " + destPath + " /data/BT_Addr");
+            cmds.add("chmod 660 /data/BT_Addr");
+            cmds.add("chown root.nvram /data/BT_Addr");
+            
+            // /data/nvram/ - REZERVNI IZVOR
             cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/BT_Addr");
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/BT_Addr");
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/BT_Addr");
 
-            // Kopiranje na /data/nvdata/
+            // /data/nvdata/ - AKO POSTOJI
             cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
             cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
             cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/BT_Addr 2>/dev/null || true");
