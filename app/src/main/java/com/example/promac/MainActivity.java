@@ -10,7 +10,6 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -33,7 +32,6 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvWifiResult;
     private EditText etWifiMac;
     private Button btnWriteWifi, btnCopyWifi;
-    private CheckBox cbGenOnReset;
     private String currentWifiMac = "";
 
     // UI Bluetooth
@@ -56,7 +54,6 @@ public class MainActivity extends AppCompatActivity {
 
         tvWifiResult = findViewById(R.id.tvWifiResult);
         etWifiMac = findViewById(R.id.etWifiMac);
-        cbGenOnReset = findViewById(R.id.cbGenOnReset);
         Button btnReadWifi = findViewById(R.id.btnReadWifi);
         btnWriteWifi = findViewById(R.id.btnWriteWifi);
         Button btnGenerateWifi = findViewById(R.id.btnGenerateWifi);
@@ -159,10 +156,6 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                if (data[4] == -95 && cbGenOnReset != null) {
-                    cbGenOnReset.setChecked(true);
-                }
-
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[4], data[5], data[6], data[7], data[8], data[9]);
                 currentWifiMac = mac;
@@ -174,10 +167,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void confirmWriteMacAddress() {
-        boolean autoGen = (cbGenOnReset != null && cbGenOnReset.isChecked());
         String rawMac = etWifiMac.getText().toString().trim();
 
-        if (!autoGen && !isValidMac(rawMac)) {
+        if (!isValidMac(rawMac)) {
             Toast.makeText(this, "Your MAC is invalid.", Toast.LENGTH_LONG).show();
             return;
         }
@@ -185,21 +177,16 @@ public class MainActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
             .setTitle("Confirmation")
             .setMessage("Do you confirm changing the Wi-Fi MAC?")
-            .setPositiveButton("Change", (dialog, which) -> startWriteProcess(rawMac, autoGen))
+            .setPositiveButton("Change", (dialog, which) -> startWriteProcess(rawMac))
             .setNegativeButton("Cancel", null)
             .show();
     }
 
-    private void startWriteProcess(String rawMac, boolean autoGen) {
+    private void startWriteProcess(String rawMac) {
         Toast.makeText(this, "Changing Wi-Fi MAC...", Toast.LENGTH_SHORT).show();
 
         executor.execute(() -> {
-            String[] b;
-            if (autoGen) {
-                b = new String[]{"A1", "02", "02", "02", "02", "03"};
-            } else {
-                b = rawMac.split(":");
-            }
+            String[] b = rawMac.split(":");
 
             String destPath = getFilesDir().getAbsolutePath() + "/WIFI";
             File localFile = new File(destPath);
@@ -265,7 +252,6 @@ public class MainActivity extends AppCompatActivity {
             String fileName = "BT_Addr";
             String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
 
-            // Kao i za Wi-Fi - kopiraj sa /data/nvram/
             ArrayList<String> cmds = new ArrayList<>();
             cmds.add("cp -rp /data/nvram/APCFG/APRDEB/" + fileName + " " + destPath);
             cmds.add("chmod 0777 " + destPath);
@@ -295,7 +281,6 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // MAC adresa je na pozicijama 0-5 (prvih 6 bajtova)
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -331,7 +316,18 @@ public class MainActivity extends AppCompatActivity {
             String fileName = "BT_Addr";
             String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
 
-            // 1. Pročitaj originalni fajl (66 bytes sa checksum) sa /data/nvram/
+            // 1. Isključi Bluetooth
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("service call bluetooth_manager 8");
+            executeRootCmds(cmds);
+
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            // 2. Pročitaj originalni fajl (66 bytes) sa /data/nvram/
             File sourceFile = new File("/data/nvram/APCFG/APRDEB/" + fileName);
             byte[] originalData = new byte[BT_FILE_SIZE_WITH_CHECKSUM];
             int originalLength = 0;
@@ -342,7 +338,6 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IOException ignored) {}
             }
 
-            // Ako nema fajla, kreiraj prazan (66 bytes)
             if (originalLength != BT_FILE_SIZE_WITH_CHECKSUM) {
                 originalLength = BT_FILE_SIZE_WITH_CHECKSUM;
                 for (int i = 0; i < originalLength; i++) {
@@ -350,11 +345,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            // 2. Kreiraj 64-bajtni fajl BEZ checksum-a (skini poslednja 2 bajta)
+            // 3. Kreiraj 64-bajtni fajl (skini poslednja 2 bajta - checksum)
             byte[] dataWithoutChecksum = new byte[BT_FILE_SIZE_WITHOUT_CHECKSUM];
             System.arraycopy(originalData, 0, dataWithoutChecksum, 0, BT_FILE_SIZE_WITHOUT_CHECKSUM);
 
-            // 3. Zameni MAC adresu na početku (pozicije 0-5)
+            // 4. Zameni MAC adresu (pozicije 0-5)
             dataWithoutChecksum[0] = hexToByte(b[0]);
             dataWithoutChecksum[1] = hexToByte(b[1]);
             dataWithoutChecksum[2] = hexToByte(b[2]);
@@ -362,36 +357,37 @@ public class MainActivity extends AppCompatActivity {
             dataWithoutChecksum[4] = hexToByte(b[4]);
             dataWithoutChecksum[5] = hexToByte(b[5]);
 
-            // 4. Sačuvaj 64-bajtni fajl u /data/BT_Addr (bez checksum)
-            String destPathNoChecksum = getFilesDir().getAbsolutePath() + "/" + fileName + "_no_crc";
-            try (FileOutputStream file = new FileOutputStream(destPathNoChecksum)) {
+            // 5. Sačuvaj privremeni fajl
+            String tempPath = getFilesDir().getAbsolutePath() + "/" + fileName + "_temp";
+            try (FileOutputStream file = new FileOutputStream(tempPath)) {
                 file.write(dataWithoutChecksum);
             } catch (IOException e) {
                 mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error saving BT file.", Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            // 5. Kopiraj 64-bajtni fajl na /data/BT_Addr (bez checksum, sistem će ga sam dopuniti)
-            ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("cp -rp " + destPathNoChecksum + " /data/" + fileName);
+            // 6. Kopiraj na sve lokacije
+            cmds.clear();
+
+            // /data/BT_Addr (64 bytes, bez checksum)
+            cmds.add("cp -rp " + tempPath + " /data/" + fileName);
             cmds.add("chmod 660 /data/" + fileName);
             cmds.add("chown root.nvram /data/" + fileName);
 
-            // 6. Kopiraj ISTI 64-bajtni fajl na /data/nvram/ (bez checksum)
-            cmds.add("cp -rp " + destPathNoChecksum + " /data/nvram/APCFG/APRDEB/" + fileName);
+            // /data/nvram/ (64 bytes, bez checksum)
+            cmds.add("cp -rp " + tempPath + " /data/nvram/APCFG/APRDEB/" + fileName);
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/" + fileName);
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/" + fileName);
 
-            // 7. Kopiraj ISTI 64-bajtni fajl na /nvdata/ (bez checksum)
-            cmds.add("cp -rp " + destPathNoChecksum + " /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+            // /nvdata/ (64 bytes, bez checksum)
+            cmds.add("cp -rp " + tempPath + " /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
             cmds.add("chmod 660 /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
             cmds.add("chown root.nvram /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
 
             cmds.add("sync");
             executeRootCmds(cmds);
 
-            // Obriši privremeni fajl
-            new File(destPathNoChecksum).delete();
+            new File(tempPath).delete();
 
             mainHandler.post(() -> {
                 tvBtResult.setText("Write Bluetooth Mac:\n" + rawMac);
