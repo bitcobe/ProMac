@@ -91,13 +91,6 @@
                 android:layout_marginStart="4dp" />
         </LinearLayout>
 
-        <CheckBox
-            android:id="@+id/cbGenOnReset"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Auto-generate on reset"
-            android:layout_marginTop="6dp" />
-
         <!-- DIVIDER -->
         <View
             android:layout_width="match_parent"
