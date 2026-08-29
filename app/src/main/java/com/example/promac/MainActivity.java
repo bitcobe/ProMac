@@ -45,6 +45,10 @@ public class MainActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    private static final int BT_FILE_SIZE_WITH_CHECKSUM = 66;
+    private static final int BT_FILE_SIZE_WITHOUT_CHECKSUM = 64;
+    private static final int MAC_LEN = 6;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -123,7 +127,7 @@ public class MainActivity extends AppCompatActivity {
                 macBytes[3], macBytes[4], macBytes[5]);
     }
 
-    // ==================== WI-FI ====================
+    // ==================== WI-FI LOGIKA ====================
     private void readMacAddress() {
         tvWifiResult.setText("Reading...");
         executor.execute(() -> {
@@ -252,45 +256,36 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ==================== BLUETOOTH ====================
+    // ==================== BLUETOOTH LOGIKA ====================
     
     private void readBtMacAddress() {
         tvBtResult.setText("Reading...");
 
         executor.execute(() -> {
             String fileName = "BT_Addr";
+            String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
 
-            String[] possiblePaths = {
-                "/data/BT_Addr",
-                "/data/nvram/APCFG/APRDEB/" + fileName,
-                "/data/nvdata/APCFG/APRDEB/" + fileName
-            };
+            // Kao i za Wi-Fi - kopiraj sa /data/nvram/
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("cp -rp /data/nvram/APCFG/APRDEB/" + fileName + " " + destPath);
+            cmds.add("chmod 0777 " + destPath);
+            executeRootCmds(cmds);
 
-            byte[] bytes = null;
-            for (String path : possiblePaths) {
-                String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
-                ArrayList<String> cmds = new ArrayList<>();
-                cmds.add("cp -rp " + path + " " + destPath + " 2>/dev/null");
-                cmds.add("chmod 0777 " + destPath);
-                executeRootCmds(cmds);
+            File localFile = new File(destPath);
+            byte[] fileContent = new byte[BT_FILE_SIZE_WITH_CHECKSUM];
+            boolean readSuccess = false;
 
-                File localFile = new File(destPath);
-                byte[] fileContent = new byte[66];
-
-                if (localFile.exists()) {
-                    try (FileInputStream fin = new FileInputStream(localFile)) {
-                        int bytesRead = fin.read(fileContent);
-                        if (bytesRead >= 6) {
-                            bytes = new byte[6];
-                            System.arraycopy(fileContent, 0, bytes, 0, 6);
-                            break;
-                        }
-                    } catch (IOException ignored) {}
-                }
+            if (localFile.exists()) {
+                try (FileInputStream fin = new FileInputStream(localFile)) {
+                    int bytesRead = fin.read(fileContent);
+                    if (bytesRead >= MAC_LEN) {
+                        readSuccess = true;
+                    }
+                } catch (IOException ignored) {}
             }
 
-            final boolean success = (bytes != null);
-            final byte[] data = bytes;
+            final boolean success = readSuccess;
+            final byte[] data = fileContent;
 
             mainHandler.post(() -> {
                 if (!success) {
@@ -300,6 +295,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
+                // MAC adresa je na pozicijama 0-5 (prvih 6 bajtova)
                 String mac = String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         data[0], data[1], data[2], data[3], data[4], data[5]);
 
@@ -334,107 +330,76 @@ public class MainActivity extends AppCompatActivity {
             String[] b = rawMac.split(":");
             String fileName = "BT_Addr";
             String destPath = getFilesDir().getAbsolutePath() + "/" + fileName;
-            
-            ArrayList<String> cmds = new ArrayList<>();
-            cmds.add("service call bluetooth_manager 8");
-            executeRootCmds(cmds);
 
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+            // 1. Pročitaj originalni fajl (66 bytes sa checksum) sa /data/nvram/
+            File sourceFile = new File("/data/nvram/APCFG/APRDEB/" + fileName);
+            byte[] originalData = new byte[BT_FILE_SIZE_WITH_CHECKSUM];
+            int originalLength = 0;
+
+            if (sourceFile.exists()) {
+                try (FileInputStream fin = new FileInputStream(sourceFile)) {
+                    originalLength = fin.read(originalData);
+                } catch (IOException ignored) {}
             }
 
-            // 2. Pročitaj originalni fajl (66 bajtova)
-            byte[] fileContent = new byte[66];
-            int fileLength = 0;
-            
-            String[] possiblePaths = {
-                "/data/nvram/APCFG/APRDEB/" + fileName,
-                "/data/nvdata/APCFG/APRDEB/" + fileName
-            };
-
-            for (String path : possiblePaths) {
-                File file = new File(path);
-                if (file.exists()) {
-                    try (FileInputStream fin = new FileInputStream(file)) {
-                        fileLength = fin.read(fileContent);
-                        if (fileLength == 66) break;
-                    } catch (IOException ignored) {}
+            // Ako nema fajla, kreiraj prazan (66 bytes)
+            if (originalLength != BT_FILE_SIZE_WITH_CHECKSUM) {
+                originalLength = BT_FILE_SIZE_WITH_CHECKSUM;
+                for (int i = 0; i < originalLength; i++) {
+                    originalData[i] = 0x00;
                 }
             }
 
-            if (fileLength != 66) {
-                fileLength = 66;
-                for (int i = 0; i < fileLength; i++) {
-                    fileContent[i] = 0x00;
-                }
-            }
+            // 2. Kreiraj 64-bajtni fajl BEZ checksum-a (skini poslednja 2 bajta)
+            byte[] dataWithoutChecksum = new byte[BT_FILE_SIZE_WITHOUT_CHECKSUM];
+            System.arraycopy(originalData, 0, dataWithoutChecksum, 0, BT_FILE_SIZE_WITHOUT_CHECKSUM);
 
-            // 3. Menjaj MAC (pozicije 0-5)
-            fileContent[0] = hexToByte(b[0]);
-            fileContent[1] = hexToByte(b[1]);
-            fileContent[2] = hexToByte(b[2]);
-            fileContent[3] = hexToByte(b[3]);
-            fileContent[4] = hexToByte(b[4]);
-            fileContent[5] = hexToByte(b[5]);
+            // 3. Zameni MAC adresu na početku (pozicije 0-5)
+            dataWithoutChecksum[0] = hexToByte(b[0]);
+            dataWithoutChecksum[1] = hexToByte(b[1]);
+            dataWithoutChecksum[2] = hexToByte(b[2]);
+            dataWithoutChecksum[3] = hexToByte(b[3]);
+            dataWithoutChecksum[4] = hexToByte(b[4]);
+            dataWithoutChecksum[5] = hexToByte(b[5]);
 
-            // 4. Izračunaj CRC-16 checksum za PRVIH 64 BAJTOVA
-            byte[] dataForChecksum = new byte[64];
-            System.arraycopy(fileContent, 0, dataForChecksum, 0, 64);
-            byte[] checksum = calculateChecksum(dataForChecksum);
-
-            fileContent[64] = checksum[0];
-            fileContent[65] = checksum[1];
-
-            // 5. Piši fajl (66 bajtova)
-            try (FileOutputStream file = new FileOutputStream(destPath)) {
-                file.write(fileContent, 0, 66);
+            // 4. Sačuvaj 64-bajtni fajl u /data/BT_Addr (bez checksum)
+            String destPathNoChecksum = getFilesDir().getAbsolutePath() + "/" + fileName + "_no_crc";
+            try (FileOutputStream file = new FileOutputStream(destPathNoChecksum)) {
+                file.write(dataWithoutChecksum);
             } catch (IOException e) {
-                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error in BT MAC changing.", Toast.LENGTH_SHORT).show());
+                mainHandler.post(() -> Toast.makeText(MainActivity.this, "Error saving BT file.", Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            cmds.clear();
-            
-            // /data/nvram/
-            cmds.add("cp -rp " + destPath + " /data/nvram/APCFG/APRDEB/" + fileName);
+            // 5. Kopiraj 64-bajtni fajl na /data/BT_Addr (bez checksum, sistem će ga sam dopuniti)
+            ArrayList<String> cmds = new ArrayList<>();
+            cmds.add("cp -rp " + destPathNoChecksum + " /data/" + fileName);
+            cmds.add("chmod 660 /data/" + fileName);
+            cmds.add("chown root.nvram /data/" + fileName);
+
+            // 6. Kopiraj ISTI 64-bajtni fajl na /data/nvram/ (bez checksum)
+            cmds.add("cp -rp " + destPathNoChecksum + " /data/nvram/APCFG/APRDEB/" + fileName);
             cmds.add("chmod 660 /data/nvram/APCFG/APRDEB/" + fileName);
             cmds.add("chown root.nvram /data/nvram/APCFG/APRDEB/" + fileName);
-            
-            // /data/nvdata/
-            cmds.add("cp -rp " + destPath + " /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
-            cmds.add("chmod 660 /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
-            cmds.add("chown root.nvram /data/nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
-            
+
+            // 7. Kopiraj ISTI 64-bajtni fajl na /nvdata/ (bez checksum)
+            cmds.add("cp -rp " + destPathNoChecksum + " /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+            cmds.add("chmod 660 /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+            cmds.add("chown root.nvram /nvdata/APCFG/APRDEB/" + fileName + " 2>/dev/null || true");
+
             cmds.add("sync");
             executeRootCmds(cmds);
 
+            // Obriši privremeni fajl
+            new File(destPathNoChecksum).delete();
+
             mainHandler.post(() -> {
                 tvBtResult.setText("Write Bluetooth Mac:\n" + rawMac);
-                Toast.makeText(MainActivity.this, 
-                    "Bluetooth MAC changed to: " + rawMac + "\nReboot for changes to take effect.", 
+                Toast.makeText(MainActivity.this,
+                    "Bluetooth MAC changed to: " + rawMac + "\nReboot for changes to take effect.",
                     Toast.LENGTH_LONG).show();
             });
         });
-    }
-
-    // ==================== CRC-16 CHECKSUM ====================
-
-    private byte[] calculateChecksum(byte[] data) {
-        int crc = 0x0000;
-        for (byte b : data) {
-            crc ^= (b & 0xFF) << 8;
-            for (int i = 0; i < 8; i++) {
-                if ((crc & 0x8000) != 0) {
-                    crc = (crc << 1) ^ 0x1021;
-                } else {
-                    crc <<= 1;
-                }
-                crc &= 0xFFFF;
-            }
-        }
-        return new byte[]{(byte) ((crc >> 8) & 0xFF), (byte) (crc & 0xFF)};
     }
 
     // ==================== POMOĆNE METODE ====================
